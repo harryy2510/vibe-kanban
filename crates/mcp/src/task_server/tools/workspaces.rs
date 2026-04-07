@@ -1,4 +1,6 @@
-use db::models::{requests::UpdateWorkspace, workspace::Workspace};
+use db::models::{
+    requests::UpdateWorkspace, workspace::Workspace, workspace_repo::RepoWithTargetBranch,
+};
 use rmcp::{
     ErrorData, handler::server::wrapper::Parameters, model::CallToolResult, schemars, tool,
     tool_router,
@@ -306,4 +308,66 @@ impl McpServer {
             delete_branches,
         })
     }
+
+    #[tool(
+        description = "List repositories attached to a workspace, including their target branches. `workspace_id` is optional if running inside that workspace context."
+    )]
+    async fn list_workspace_repos(
+        &self,
+        Parameters(McpListWorkspaceReposRequest { workspace_id }): Parameters<
+            McpListWorkspaceReposRequest,
+        >,
+    ) -> Result<CallToolResult, ErrorData> {
+        let workspace_id = match self.resolve_workspace_id(workspace_id) {
+            Ok(id) => id,
+            Err(e) => return Ok(Self::tool_error(e)),
+        };
+        if let Err(e) = self.scope_allows_workspace(workspace_id) {
+            return Ok(Self::tool_error(e));
+        }
+
+        let url = self.url(&format!("/api/workspaces/{}/repos", workspace_id));
+        let repos: Vec<RepoWithTargetBranch> = match self.send_json(self.client.get(&url)).await {
+            Ok(r) => r,
+            Err(e) => return Ok(Self::tool_error(e)),
+        };
+
+        let repo_summaries: Vec<WorkspaceRepoSummary> = repos
+            .into_iter()
+            .map(|r| WorkspaceRepoSummary {
+                repo_id: r.repo.id.to_string(),
+                name: r.repo.name,
+                target_branch: r.target_branch,
+            })
+            .collect();
+
+        McpServer::success(&McpListWorkspaceReposResponse {
+            workspace_id: workspace_id.to_string(),
+            count: repo_summaries.len(),
+            repos: repo_summaries,
+        })
+    }
+}
+
+#[derive(Debug, Deserialize, schemars::JsonSchema)]
+struct McpListWorkspaceReposRequest {
+    #[schemars(description = "Workspace ID. Optional if running inside that workspace context.")]
+    workspace_id: Option<Uuid>,
+}
+
+#[derive(Debug, Serialize, schemars::JsonSchema)]
+struct WorkspaceRepoSummary {
+    #[schemars(description = "Repository ID")]
+    repo_id: String,
+    #[schemars(description = "Repository name")]
+    name: String,
+    #[schemars(description = "Target branch for this workspace")]
+    target_branch: String,
+}
+
+#[derive(Debug, Serialize, schemars::JsonSchema)]
+struct McpListWorkspaceReposResponse {
+    workspace_id: String,
+    repos: Vec<WorkspaceRepoSummary>,
+    count: usize,
 }

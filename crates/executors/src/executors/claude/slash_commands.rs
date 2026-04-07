@@ -198,11 +198,6 @@ impl ClaudeCode {
             CommandBuilder::new(base_command(self.claude_code_router.unwrap_or(false)))
                 .params(["-p"]);
 
-        // Include globally-installed plugins so discovery sees their skills/agents
-        for dir in Self::discover_plugin_dirs() {
-            builder = builder.extend_params(["--plugin-dir", &dir.to_string_lossy()]);
-        }
-
         builder = builder.extend_params([
             "--verbose",
             "--output-format=stream-json",

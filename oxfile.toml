@@ -7,7 +7,7 @@ stop_timeout_secs = 5
 
 [[apps]]
 name = "vibe-kanban"
-command = "bunx vibe-kanban@https://github.com/BloopAI/vibe-kanban/releases/download/v0.1.41-20260403182044/vibe-kanban-0.1.41.tgz"
+command = "bunx vibe-kanban@https://github.com/harryy2510/vibe-kanban/releases/download/v0.1.43-20260407124500/vibe-kanban-0.1.43.tgz"
 health_cmd = "curl -fsS http://localhost:4040"
 
 [apps.env]

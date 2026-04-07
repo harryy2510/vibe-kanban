@@ -296,18 +296,6 @@ impl ClaudeCode {
             .discover_available_command_and_plugins(current_dir)
             .await?;
 
-        tracing::info!(
-            "Claude Code discovery returned {} slash commands, {} plugins, {} agents",
-            names.len(),
-            plugins.len(),
-            agents.len()
-        );
-        tracing::info!(
-            "Discovered plugins: {:?}",
-            plugins.iter().map(|p| &p.name).collect::<Vec<_>>()
-        );
-        tracing::info!("Discovered slash commands: {:?}", names);
-
         let agent_options = Self::map_discovered_agents(agents);
 
         let builtin: HashSet<String> = Self::hardcoded_slash_commands()

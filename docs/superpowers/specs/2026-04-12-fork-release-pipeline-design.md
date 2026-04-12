@@ -7,7 +7,7 @@
 ## Products shipped from this repo
 
 | # | Product | What | Runs | Artifact |
-|---|---|---|---|---|
+| --- | --- | --- | --- | --- |
 | 1 | **CLI / MCP** | `vibe-kanban`, `vibe-kanban-mcp`, `vibe-kanban-review` | User machine (incl. the Dokploy host over SSH) | npm `@harryy2510/vibe-kanban` + binaries on R2 |
 | 2 | **Remote API** | `crates/remote` | Dokploy stack | `ghcr.io/harryy2510/vibe-kanban-remote:latest` |
 | 3 | **Relay** | `crates/relay-tunnel` | Dokploy stack | `ghcr.io/harryy2510/vibe-kanban-relay:latest` |
@@ -17,7 +17,7 @@ Supporting stack (already deployed via Dokploy, no pipeline changes): postgres, 
 ## Domain map
 
 | Domain | Points to | Role |
-|---|---|---|
+| --- | --- | --- |
 | `vibepilot.org` | Dokploy → remote-web frontend (via remote-server) | User-facing web app (login, dashboard) |
 | `api.vibepilot.org` | Dokploy → `remote-server:8081` | Remote API consumed by CLI + web |
 | `relay.vibepilot.org` | Dokploy → `relay-server:8082` | WebRTC/WS relay |
@@ -78,7 +78,7 @@ Supporting stack (already deployed via Dokploy, no pipeline changes): postgres, 
 ### Rust / backend
 
 | File | Change |
-|---|---|
+| --- | --- |
 | `crates/remote/Cargo.toml` | Remove `billing` dep line + `# private crate for billing` comment. Change `vk-billing = ["dep:billing"]` to `vk-billing = []`. (Matches what `crates/remote/Dockerfile` already does via `sed`.) |
 | All Rust defaults referencing `https://api.vibekanban.com` | Replace with `https://api.vibepilot.org`. |
 | `Cargo.lock` | Regenerate after `billing` dep removal. |
@@ -86,7 +86,7 @@ Supporting stack (already deployed via Dokploy, no pipeline changes): postgres, 
 ### Frontend
 
 | File | Change |
-|---|---|
+| --- | --- |
 | Any hardcoded `vibekanban.com` in `packages/{local-web,remote-web,web-core,ui}/**` | Replace with `vibepilot.org` equivalent. |
 | `VK_SHARED_API_BASE` default | `https://api.vibepilot.org`. |
 | `VITE_RELAY_API_BASE_URL` default | `https://relay.vibepilot.org`. |
@@ -94,7 +94,7 @@ Supporting stack (already deployed via Dokploy, no pipeline changes): postgres, 
 ### npm package
 
 | File | Change |
-|---|---|
+| --- | --- |
 | `npx-cli/package.json` → `name` | `@harryy2510/vibe-kanban` |
 | `npx-cli/package.json` → `repository.url` | `https://github.com/harryy2510/vibe-kanban` |
 | Root `package.json` → `name` | Keep private, doesn't publish |
@@ -102,10 +102,26 @@ Supporting stack (already deployed via Dokploy, no pipeline changes): postgres, 
 ### Docs / misc
 
 | File | Change |
-|---|---|
+| --- | --- |
 | `update.sh` | Delete (replaced by workflow). |
 | `README.md` | Add a "VibePilot fork" note; leave rest as-is. |
 | `docs/**/*.mdx` references to `vibekanban.com` | Update or leave; docs aren't deployed by the pipeline, low priority. |
+
+## Workflow simplifications (vs upstream)
+
+Upstream's pipeline carries machinery that's irrelevant to a solo fork. The trimmed version drops:
+
+- **Windows-arm64 platform.** Extremely rare, doubles Windows build time. Keep 5 platforms: `linux-x64`, `linux-arm64`, `macos-x64`, `macos-arm64`, `windows-x64`. Adding arm64-windows later is trivial if needed.
+- **Blacksmith paid runners.** Switch to stock `ubuntu-latest` / `macos-latest` / `windows-latest`. No third-party account needed.
+- **Job chain artifact hand-off.** Upstream passes zipped binaries through `build-frontend` → `build-backend` → `package-npx-cli` → `upload-to-r2` → `create-prerelease`. Each matrix entry in the fork instead builds, packages, and uploads to R2 in one job -- no cross-job artifacts.
+- **Branch-suffix prerelease logic.** Only `main` triggers releases, so tags are just `v<version>-<timestamp>`.
+- **Blacksmith-specific caches.** Use `Swatinem/rust-cache` (stock) for Rust caching.
+- **SQLx offline prepare steps.** CLI binaries use SQLite with `.sqlx/` checked in -- no `DATABASE_URL` setup needed. Postgres prep stays inside the `remote` Dockerfile.
+- **Tauri update JSON generation + signing.** Already dropped with Tauri.
+- **`CARGO_XWIN_VERSION` / xwin Windows cross-compile.** Windows builds run on real Windows runners, so no cross-compile toolchain needed.
+- **Fork-PR SSH conditional in `test.yml`.** No billing crate means no SSH agent step at all.
+
+Net effect: ~1600 lines of workflow YAML across 8 files collapse to ~400 lines across 2 files (`release.yml` + `test.yml`).
 
 ## Workflows to delete
 
@@ -129,7 +145,7 @@ Supporting stack (already deployed via Dokploy, no pipeline changes): postgres, 
 ## GitHub secrets required
 
 | Secret | Value |
-|---|---|
+| --- | --- |
 | `GITHUB_TOKEN` | Auto-provided; used for GHCR push + GitHub release creation |
 | `DEPLOY_KEY` | SSH deploy key (write-access) on fork for pushing version-bump commit back to `main` |
 | `R2_BINARIES_ACCESS_KEY_ID` | Cloudflare R2 token access key |
@@ -205,7 +221,7 @@ CI auto-restarts this app after each successful CLI publish via SSH: `oxmgr rest
 ## Error handling
 
 | Failure | Effect | Recovery |
-|---|---|---|
+| --- | --- | --- |
 | CLI build fails on a platform | No release, no npm publish | Fix, push again; workflow auto-retries from bumped version |
 | R2 upload fails | `.tgz` never baked with `BINARY_TAG` → no broken npm version | Re-run workflow |
 | `npm publish` fails (409 duplicate) | Version collision | Push any commit → auto-bumps → retries |

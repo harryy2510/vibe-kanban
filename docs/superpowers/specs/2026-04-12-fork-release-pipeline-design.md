@@ -8,7 +8,7 @@
 
 | # | Product | What | Runs | Artifact |
 | --- | --- | --- | --- | --- |
-| 1 | **CLI / MCP** | `vibe-kanban`, `vibe-kanban-mcp`, `vibe-kanban-review` | User machine (incl. the Dokploy host over SSH) | npm `@harryy2510/vibe-kanban` + binaries on R2 |
+| 1 | **CLI / MCP** | `vibe-kanban`, `vibe-kanban-mcp`, `vibe-kanban-review` | User machine (incl. the Dokploy host over SSH) | npm `@harryy/vibe-kanban` + binaries on R2 |
 | 2 | **Remote API** | `crates/remote` | Dokploy stack | `ghcr.io/harryy2510/vibe-kanban-remote:latest` |
 | 3 | **Relay** | `crates/relay-tunnel` | Dokploy stack | `ghcr.io/harryy2510/vibe-kanban-relay:latest` |
 
@@ -45,7 +45,7 @@ Supporting stack (already deployed via Dokploy, no pipeline changes): postgres, 
       |        bump version → build 6 platforms × 3 binaries
       |        → upload zips + manifest.json to R2 (binaries.vibepilot.org)
       |        → npm pack with R2_BASE_URL + BINARY_TAG baked
-      |        → npm publish @harryy2510/vibe-kanban
+      |        → npm publish @harryy/vibe-kanban
       |        → create GitHub release (artifacts for audit)
       |
       +--> job: remote-image
@@ -71,7 +71,7 @@ Supporting stack (already deployed via Dokploy, no pipeline changes): postgres, 
 - `relay-image`: runs on changes to `crates/relay-tunnel/**`, `crates/relay-*/**`, or manual dispatch.
 - `dokploy-redeploy`: runs iff at least one of `remote-image` or `relay-image` ran successfully.
 
-**Version bumping:** `cli-pipeline` bumps patch version on every run (based on `npm view @harryy2510/vibe-kanban version`). Backend images use `:latest` + `:<git-sha>` tags — no semver bumping needed since Dokploy always pulls `:latest`.
+**Version bumping:** `cli-pipeline` bumps patch version on every run (based on `npm view @harryy/vibe-kanban version`). Backend images use `:latest` + `:<git-sha>` tags — no semver bumping needed since Dokploy always pulls `:latest`.
 
 ## Code changes required (one-time rebrand)
 
@@ -95,7 +95,7 @@ Supporting stack (already deployed via Dokploy, no pipeline changes): postgres, 
 
 | File | Change |
 | --- | --- |
-| `npx-cli/package.json` → `name` | `@harryy2510/vibe-kanban` |
+| `npx-cli/package.json` → `name` | `@harryy/vibe-kanban` |
 | `npx-cli/package.json` → `repository.url` | `https://github.com/harryy2510/vibe-kanban` |
 | Root `package.json` → `name` | Keep private, doesn't publish |
 
@@ -153,7 +153,7 @@ Net effect: ~1600 lines of workflow YAML across 8 files collapse to ~400 lines a
 | `R2_BINARIES_ENDPOINT` | `https://<account-id>.r2.cloudflarestorage.com` |
 | `R2_BINARIES_BUCKET` | e.g. `vibepilot-binaries` |
 | `R2_BINARIES_PUBLIC_URL` | `https://binaries.vibepilot.org` |
-| `NPM_TOKEN` | npmjs.com Automation token scoped to `@harryy2510` |
+| `NPM_TOKEN` | npmjs.com Automation token scoped to `@harryy` |
 | `DOKPLOY_WEBHOOK_URL` | Redeploy webhook for the Dokploy stack |
 | `SERVER_SSH_HOST` | Host where oxmgr + vibe-kanban run (e.g. `server.hariom.cc`) |
 | `SERVER_SSH_USER` | SSH user with permission to run `oxmgr` (e.g. `ubuntu`) |
@@ -172,7 +172,7 @@ All upstream secrets removed: `VK_PRIVATE_DEPLOY_KEY`, `SENTRY_*`, `POSTHOG_*`, 
 ### npm
 
 1. Create npm account (if needed).
-2. Create org `@harryy2510` (free for public packages).
+2. Create org `@harryy` (free for public packages).
 3. Generate **Automation** access token.
 
 ### GHCR
@@ -192,7 +192,7 @@ Point each subdomain per the Domain map. TLS via Let's Encrypt is already handle
 
 **CLI on any machine (including `server.hariom.cc`):**
 ```
-bunx -y @harryy2510/vibe-kanban@latest mcp
+bunx -y @harryy/vibe-kanban@latest mcp
 ```
 
 **oxmgr on the Dokploy host (runs the local vibe-kanban daemon):**
@@ -202,7 +202,7 @@ bunx -y @harryy2510/vibe-kanban@latest mcp
 ```toml
 [[apps]]
 name = "vibe-kanban"
-command = "bunx -y @harryy2510/vibe-kanban@latest"
+command = "bunx -y @harryy/vibe-kanban@latest"
 health_cmd = "curl -fsS http://localhost:4040"
 
 [apps.env]
@@ -232,16 +232,16 @@ CI auto-restarts this app after each successful CLI publish via SSH: `oxmgr rest
 
 1. Merge PR with code changes + new workflow. First `main` push triggers full pipeline.
 2. Verify R2 contains `binaries/v<version>-<ts>/linux-x64/vibe-kanban-mcp.zip`.
-3. Verify npm: `npm view @harryy2510/vibe-kanban version`.
+3. Verify npm: `npm view @harryy/vibe-kanban version`.
 4. Verify GHCR: `docker pull ghcr.io/harryy2510/vibe-kanban-remote:latest`.
 5. Verify Dokploy pulled the new image (check `docker inspect` timestamp on the host).
-6. From `server.hariom.cc`: `bunx -y @harryy2510/vibe-kanban@latest mcp` — MCP binary downloads, sha256 verifies, binary runs and exposes new tool endpoints.
+6. From `server.hariom.cc`: `bunx -y @harryy/vibe-kanban@latest mcp` — MCP binary downloads, sha256 verifies, binary runs and exposes new tool endpoints.
 7. From browser: log in at `https://vibepilot.org`, confirm all features work (billing is disabled, so no paywall).
 
 ## Bootstrap order
 
 1. Create R2 bucket + API token + custom domain `binaries.vibepilot.org`.
-2. Create npm org `@harryy2510` + Automation token.
+2. Create npm org `@harryy` + Automation token.
 3. Configure Cloudflare DNS for all `vibepilot.org` subdomains (point at Dokploy LB / R2).
 4. Update Dokploy stack `.env` with new domains (replace `*.hariom.cc` → `*.vibepilot.org`); enable redeploy webhook; update OAuth redirect URIs for new domain.
 5. Update GitHub OAuth App + Google OAuth consent screen with new redirect URIs (`https://api.vibepilot.org/...`).

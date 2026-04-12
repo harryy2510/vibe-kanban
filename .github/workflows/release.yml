@@ -382,3 +382,19 @@ jobs:
       - name: Trigger Dokploy redeploy
         run: |
           curl -fsSL -X POST "${{ secrets.DOKPLOY_WEBHOOK_URL }}"
+
+  restart-oxmgr:
+    needs: publish-npm
+    runs-on: ubuntu-latest
+    steps:
+      - name: Restart oxmgr vibe-kanban app
+        uses: appleboy/ssh-action@v1
+        with:
+          host: ${{ vars.SERVER_SSH_HOST }}
+          username: ${{ vars.SERVER_SSH_USER }}
+          key: ${{ secrets.SERVER_SSH_KEY }}
+          script: |
+            source ~/.profile 2>/dev/null || true
+            source ~/.bashrc 2>/dev/null || true
+            export PATH="$HOME/.bun/bin:$HOME/.local/bin:/usr/local/bin:$PATH"
+            oxmgr restart vibe-kanban

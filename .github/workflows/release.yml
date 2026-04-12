@@ -1,0 +1,82 @@
+name: Release
+
+on:
+  push:
+    branches:
+      - main
+    paths-ignore:
+      - 'docs/**'
+      - 'README.md'
+      - '.gitignore'
+  workflow_dispatch:
+
+concurrency:
+  group: release-${{ github.ref_name }}
+  cancel-in-progress: false
+
+permissions:
+  contents: write
+  packages: write
+  id-token: write
+
+env:
+  NODE_VERSION: 22
+  PNPM_VERSION: 10.13.1
+  RUST_TOOLCHAIN: nightly-2025-12-04
+
+jobs:
+  bump-version:
+    runs-on: ubuntu-latest
+    outputs:
+      new_tag: ${{ steps.version.outputs.new_tag }}
+      new_version: ${{ steps.version.outputs.new_version }}
+    steps:
+      - uses: actions/checkout@v6
+        with:
+          token: ${{ secrets.GITHUB_TOKEN }}
+          ssh-key: ${{ secrets.DEPLOY_KEY }}
+
+      - uses: actions/setup-node@v5
+        with:
+          node-version: ${{ env.NODE_VERSION }}
+
+      - name: Install cargo-edit
+        uses: taiki-e/cache-cargo-install-action@34ce5120836e5f9f1508d8713d7fdea0e8facd6f
+        with:
+          tool: cargo-edit
+          git: https://github.com/killercup/cargo-edit
+          rev: 96a3879fe3bafda6d0f943b642997fbf03e235cd
+
+      - name: Determine new version
+        id: version
+        run: |
+          latest_npm=$(npm view @harryy/vibe-kanban version 2>/dev/null || echo "0.0.0")
+          current=$(node -p "require('./package.json').version")
+          base=$(node -e "
+            const a='$latest_npm'.split('.').map(Number), b='$current'.split('.').map(Number);
+            for (let i=0;i<3;i++){
+              if ((a[i]||0)>(b[i]||0)){console.log('$latest_npm');process.exit()}
+              if ((a[i]||0)<(b[i]||0)){console.log('$current');process.exit()}
+            }
+            console.log('$current')
+          ")
+          npm version "$base" --no-git-tag-version --allow-same-version
+          npm version patch --no-git-tag-version
+          new_version=$(node -p "require('./package.json').version")
+          timestamp=$(date +%Y%m%d%H%M%S)
+          new_tag="v${new_version}-${timestamp}"
+          echo "new_version=$new_version" >> $GITHUB_OUTPUT
+          echo "new_tag=$new_tag" >> $GITHUB_OUTPUT
+          (cd npx-cli && npm version "$new_version" --no-git-tag-version --allow-same-version)
+          (cd packages/local-web && npm version "$new_version" --no-git-tag-version --allow-same-version)
+          cargo set-version --workspace "$new_version"
+
+      - name: Commit and tag
+        run: |
+          git config user.name "vibepilot-ci"
+          git config user.email "ci@vibepilot.org"
+          git add package.json npx-cli/package.json packages/local-web/package.json Cargo.toml crates/*/Cargo.toml Cargo.lock
+          git commit -m "chore: bump version to ${{ steps.version.outputs.new_version }}"
+          git tag "${{ steps.version.outputs.new_tag }}"
+          git push origin HEAD:main
+          git push origin "${{ steps.version.outputs.new_tag }}"

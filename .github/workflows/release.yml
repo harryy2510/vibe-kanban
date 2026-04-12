@@ -310,10 +310,10 @@ jobs:
           file: crates/remote/Dockerfile
           push: true
           tags: |
-            ghcr.io/harryy2510/vibe-kanban-remote:latest
-            ghcr.io/harryy2510/vibe-kanban-remote:${{ needs.meta.outputs.tag }}
+            ghcr.io/${{ github.repository }}/remote:latest
+            ghcr.io/${{ github.repository }}/remote:${{ needs.meta.outputs.tag }}
           labels: |
-            org.opencontainers.image.source=https://github.com/harryy2510/vibe-kanban
+            org.opencontainers.image.source=https://github.com/${{ github.repository }}
             org.opencontainers.image.description=VibePilot remote API service
             org.opencontainers.image.licenses=MIT
           build-args: |
@@ -348,10 +348,10 @@ jobs:
           file: crates/relay-tunnel/Dockerfile
           push: true
           tags: |
-            ghcr.io/harryy2510/vibe-kanban-relay:latest
-            ghcr.io/harryy2510/vibe-kanban-relay:${{ needs.meta.outputs.tag }}
+            ghcr.io/${{ github.repository }}/relay:latest
+            ghcr.io/${{ github.repository }}/relay:${{ needs.meta.outputs.tag }}
           labels: |
-            org.opencontainers.image.source=https://github.com/harryy2510/vibe-kanban
+            org.opencontainers.image.source=https://github.com/${{ github.repository }}
             org.opencontainers.image.description=VibePilot relay tunnel service
             org.opencontainers.image.licenses=MIT
           cache-from: type=gha

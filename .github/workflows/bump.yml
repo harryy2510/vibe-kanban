@@ -1,0 +1,87 @@
+name: Bump Version
+
+on:
+  push:
+    branches:
+      - main
+    paths-ignore:
+      - 'docs/**'
+      - 'README.md'
+      - '.gitignore'
+  workflow_dispatch:
+
+concurrency:
+  group: bump-${{ github.ref_name }}
+  cancel-in-progress: true
+
+permissions:
+  contents: write
+
+env:
+  NODE_VERSION: 22
+
+jobs:
+  bump-version:
+    runs-on: ubuntu-latest
+    # Skip if the push is itself a bump commit (contains [skip ci] in message).
+    # Belt-and-suspenders: GH Actions already honors [skip ci], but this is an
+    # explicit guard in case someone triggers via workflow_dispatch on a bump SHA.
+    if: "!contains(github.event.head_commit.message, '[skip ci]')"
+    steps:
+      - uses: actions/checkout@v6
+        with:
+          token: ${{ secrets.GITHUB_TOKEN }}
+          ssh-key: ${{ secrets.DEPLOY_KEY }}
+
+      - uses: actions/setup-node@v5
+        with:
+          node-version: ${{ env.NODE_VERSION }}
+          package-manager-cache: false
+
+      - name: Install cargo-edit
+        uses: taiki-e/cache-cargo-install-action@34ce5120836e5f9f1508d8713d7fdea0e8facd6f
+        with:
+          tool: cargo-edit
+          git: https://github.com/killercup/cargo-edit
+          rev: 96a3879fe3bafda6d0f943b642997fbf03e235cd
+
+      - name: Determine new version
+        id: version
+        run: |
+          latest_npm=$(npm view @harryy/vibe-kanban version 2>/dev/null || echo "0.0.0")
+          current_json=$(node -p "require('./package.json').version")
+          current_cargo=$(grep -m1 '^version = ' crates/server/Cargo.toml | sed -E 's/version = "(.*)"/\1/')
+          # Pick the highest of (npm latest, root package.json, Cargo workspace) so
+          # cargo-set-version never tries to downgrade crate manifests.
+          base=$(node -e "
+            const vs=['$latest_npm','$current_json','$current_cargo'].map(v=>v.split('.').map(Number));
+            vs.sort((a,b)=>{for(let i=0;i<3;i++){if((a[i]||0)!==(b[i]||0))return(b[i]||0)-(a[i]||0)}return 0});
+            console.log(vs[0].join('.'));
+          ")
+          echo "base version: $base  (npm=$latest_npm json=$current_json cargo=$current_cargo)"
+          npm version "$base" --no-git-tag-version --allow-same-version
+          npm version patch --no-git-tag-version
+          new_version=$(node -p "require('./package.json').version")
+          timestamp=$(date +%Y%m%d%H%M%S)
+          new_tag="v${new_version}-${timestamp}"
+          echo "new_version=$new_version" >> $GITHUB_OUTPUT
+          echo "new_tag=$new_tag" >> $GITHUB_OUTPUT
+          (cd npx-cli && npm version "$new_version" --no-git-tag-version --allow-same-version)
+          # local-web uses pnpm workspace:* protocol which npm can't parse; edit version field directly
+          node -e "const fs=require('fs'),p='packages/local-web/package.json',j=JSON.parse(fs.readFileSync(p));j.version='$new_version';fs.writeFileSync(p,JSON.stringify(j,null,2)+'\n');"
+          cargo set-version --workspace "$new_version"
+          # Also bump excluded crates (remote + relay-tunnel are workspace-exclude)
+          cargo set-version --manifest-path crates/remote/Cargo.toml "$new_version"
+          cargo set-version --manifest-path crates/relay-tunnel/Cargo.toml "$new_version"
+
+      - name: Commit and tag
+        run: |
+          git config user.name "vibepilot-ci"
+          git config user.email "ci@vibepilot.org"
+          git add -u
+          git status --short
+          git commit -m "chore: bump version to ${{ steps.version.outputs.new_version }} [skip ci]"
+          git pull --rebase origin main
+          git tag "${{ steps.version.outputs.new_tag }}"
+          git push origin HEAD:main
+          git push origin "${{ steps.version.outputs.new_tag }}"

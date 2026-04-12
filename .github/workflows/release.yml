@@ -2,13 +2,14 @@ name: Release
 
 on:
   push:
-    branches:
-      - main
-    paths-ignore:
-      - 'docs/**'
-      - 'README.md'
-      - '.gitignore'
+    tags:
+      - 'v*'
   workflow_dispatch:
+    inputs:
+      tag:
+        description: 'Tag to release (e.g. v0.1.46-20260412160500)'
+        required: true
+        type: string
 
 concurrency:
   group: release-${{ github.ref_name }}
@@ -25,77 +26,35 @@ env:
   RUST_TOOLCHAIN: nightly-2025-12-04
 
 jobs:
-  bump-version:
+  meta:
     runs-on: ubuntu-latest
     outputs:
-      new_tag: ${{ steps.version.outputs.new_tag }}
-      new_version: ${{ steps.version.outputs.new_version }}
+      tag: ${{ steps.derive.outputs.tag }}
+      version: ${{ steps.derive.outputs.version }}
     steps:
-      - uses: actions/checkout@v6
-        with:
-          token: ${{ secrets.GITHUB_TOKEN }}
-          ssh-key: ${{ secrets.DEPLOY_KEY }}
-
-      - uses: actions/setup-node@v5
-        with:
-          node-version: ${{ env.NODE_VERSION }}
-          package-manager-cache: false
-
-      - name: Install cargo-edit
-        uses: taiki-e/cache-cargo-install-action@34ce5120836e5f9f1508d8713d7fdea0e8facd6f
-        with:
-          tool: cargo-edit
-          git: https://github.com/killercup/cargo-edit
-          rev: 96a3879fe3bafda6d0f943b642997fbf03e235cd
-
-      - name: Determine new version
-        id: version
+      - name: Derive tag and version
+        id: derive
         run: |
-          latest_npm=$(npm view @harryy/vibe-kanban version 2>/dev/null || echo "0.0.0")
-          current_json=$(node -p "require('./package.json').version")
-          current_cargo=$(grep -m1 '^version = ' crates/server/Cargo.toml | sed -E 's/version = "(.*)"/\1/')
-          # Pick the highest of (npm latest, root package.json, Cargo workspace) so
-          # cargo-set-version never tries to downgrade crate manifests.
-          base=$(node -e "
-            const vs=['$latest_npm','$current_json','$current_cargo'].map(v=>v.split('.').map(Number));
-            vs.sort((a,b)=>{for(let i=0;i<3;i++){if((a[i]||0)!==(b[i]||0))return(b[i]||0)-(a[i]||0)}return 0});
-            console.log(vs[0].join('.'));
-          ")
-          echo "base version: $base  (npm=$latest_npm json=$current_json cargo=$current_cargo)"
-          npm version "$base" --no-git-tag-version --allow-same-version
-          npm version patch --no-git-tag-version
-          new_version=$(node -p "require('./package.json').version")
-          timestamp=$(date +%Y%m%d%H%M%S)
-          new_tag="v${new_version}-${timestamp}"
-          echo "new_version=$new_version" >> $GITHUB_OUTPUT
-          echo "new_tag=$new_tag" >> $GITHUB_OUTPUT
-          (cd npx-cli && npm version "$new_version" --no-git-tag-version --allow-same-version)
-          # local-web uses pnpm workspace:* protocol which npm can't parse; edit version field directly
-          node -e "const fs=require('fs'),p='packages/local-web/package.json',j=JSON.parse(fs.readFileSync(p));j.version='$new_version';fs.writeFileSync(p,JSON.stringify(j,null,2)+'\n');"
-          cargo set-version --workspace "$new_version"
-          # Also bump excluded crates (remote + relay-tunnel are workspace-exclude)
-          cargo set-version --manifest-path crates/remote/Cargo.toml "$new_version"
-          cargo set-version --manifest-path crates/relay-tunnel/Cargo.toml "$new_version"
-
-      - name: Commit and tag
-        run: |
-          git config user.name "vibepilot-ci"
-          git config user.email "ci@vibepilot.org"
-          git add -u
-          git status --short
-          git commit -m "chore: bump version to ${{ steps.version.outputs.new_version }} [skip ci]"
-          git pull --rebase origin main
-          git tag "${{ steps.version.outputs.new_tag }}"
-          git push origin HEAD:main
-          git push origin "${{ steps.version.outputs.new_tag }}"
+          # For tag pushes, github.ref_name is the tag (e.g. "v0.1.46-20260412160500").
+          # For workflow_dispatch, use the input.
+          if [ -n "${{ inputs.tag }}" ]; then
+            tag="${{ inputs.tag }}"
+          else
+            tag="${{ github.ref_name }}"
+          fi
+          # Extract bare version from tag: "v0.1.46-20260412160500" -> "0.1.46"
+          version=$(echo "$tag" | sed -E 's/^v([0-9]+\.[0-9]+\.[0-9]+).*/\1/')
+          echo "tag=$tag" >> $GITHUB_OUTPUT
+          echo "version=$version" >> $GITHUB_OUTPUT
+          echo "Releasing tag=$tag version=$version"
 
   build-frontend:
-    needs: bump-version
+    needs: meta
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v6
         with:
-          ref: ${{ needs.bump-version.outputs.new_tag }}
+          ref: ${{ needs.meta.outputs.tag }}
 
       - uses: pnpm/action-setup@v4
         with:
@@ -120,7 +79,7 @@ jobs:
           retention-days: 1
 
   build-cli:
-    needs: [bump-version, build-frontend]
+    needs: [meta, build-frontend]
     strategy:
       fail-fast: false
       matrix:
@@ -144,7 +103,7 @@ jobs:
     steps:
       - uses: actions/checkout@v6
         with:
-          ref: ${{ needs.bump-version.outputs.new_tag }}
+          ref: ${{ needs.meta.outputs.tag }}
 
       - uses: dtolnay/rust-toolchain@master
         with:
@@ -215,7 +174,7 @@ jobs:
           retention-days: 1
 
   upload-r2:
-    needs: [bump-version, build-cli]
+    needs: [meta, build-cli]
     runs-on: ubuntu-latest
     steps:
       - name: Download all platform zips
@@ -239,7 +198,7 @@ jobs:
         run: |
           node -e "
             const fs=require('fs'), crypto=require('crypto');
-            const manifest={version:'${{ needs.bump-version.outputs.new_tag }}',platforms:{}};
+            const manifest={version:'${{ needs.meta.outputs.tag }}',platforms:{}};
             const platforms=['linux-x64','linux-arm64','macos-x64','macos-arm64','windows-x64'];
             const binaries=['vibe-kanban','vibe-kanban-mcp','vibe-kanban-review'];
             for (const p of platforms) {
@@ -266,7 +225,8 @@ jobs:
         env:
           ENDPOINT: ${{ vars.R2_BINARIES_ENDPOINT }}
           BUCKET: ${{ vars.R2_BINARIES_BUCKET }}
-          TAG: ${{ needs.bump-version.outputs.new_tag }}
+          TAG: ${{ needs.meta.outputs.tag }}
+          VERSION: ${{ needs.meta.outputs.version }}
         run: |
           for platform in linux-x64 linux-arm64 macos-x64 macos-arm64 windows-x64; do
             for b in vibe-kanban vibe-kanban-mcp vibe-kanban-review; do
@@ -278,16 +238,16 @@ jobs:
             done
           done
           aws s3 cp manifest.json "s3://$BUCKET/binaries/$TAG/manifest.json" --endpoint-url "$ENDPOINT" --content-type application/json
-          echo "{\"latest\": \"${{ needs.bump-version.outputs.new_version }}\"}" | \
+          echo "{\"latest\": \"$VERSION\"}" | \
             aws s3 cp - "s3://$BUCKET/binaries/manifest.json" --endpoint-url "$ENDPOINT" --content-type application/json
 
   publish-npm:
-    needs: [bump-version, upload-r2]
+    needs: [meta, upload-r2]
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v6
         with:
-          ref: ${{ needs.bump-version.outputs.new_tag }}
+          ref: ${{ needs.meta.outputs.tag }}
 
       - uses: actions/setup-node@v5
         with:
@@ -305,7 +265,7 @@ jobs:
         run: |
           cd npx-cli
           sed -i "s|__R2_PUBLIC_URL__|${{ vars.R2_BINARIES_PUBLIC_URL }}|g" bin/cli.js
-          sed -i "s|__BINARY_TAG__|${{ needs.bump-version.outputs.new_tag }}|g" bin/cli.js
+          sed -i "s|__BINARY_TAG__|${{ needs.meta.outputs.tag }}|g" bin/cli.js
 
       - name: Pack and publish
         run: |
@@ -318,18 +278,18 @@ jobs:
       - name: Attach tgz to GitHub release
         uses: softprops/action-gh-release@153bb8e04406b158c6c84fc1615b65b24149a1fe
         with:
-          tag_name: ${{ needs.bump-version.outputs.new_tag }}
+          tag_name: ${{ needs.meta.outputs.tag }}
           generate_release_notes: true
           files: |
             npx-cli/*.tgz
 
   build-remote-image:
-    needs: bump-version
+    needs: meta
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v6
         with:
-          ref: ${{ needs.bump-version.outputs.new_tag }}
+          ref: ${{ needs.meta.outputs.tag }}
 
       - uses: docker/setup-buildx-action@v3
 
@@ -348,20 +308,19 @@ jobs:
           push: true
           tags: |
             ghcr.io/harryy2510/vibe-kanban-remote:latest
-            ghcr.io/harryy2510/vibe-kanban-remote:${{ github.sha }}
-            ghcr.io/harryy2510/vibe-kanban-remote:${{ needs.bump-version.outputs.new_tag }}
+            ghcr.io/harryy2510/vibe-kanban-remote:${{ needs.meta.outputs.tag }}
           build-args: |
             VITE_RELAY_API_BASE_URL=https://relay.vibepilot.org
           cache-from: type=gha
           cache-to: type=gha,mode=max
 
   build-relay-image:
-    needs: bump-version
+    needs: meta
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v6
         with:
-          ref: ${{ needs.bump-version.outputs.new_tag }}
+          ref: ${{ needs.meta.outputs.tag }}
 
       - uses: docker/setup-buildx-action@v3
 
@@ -380,8 +339,7 @@ jobs:
           push: true
           tags: |
             ghcr.io/harryy2510/vibe-kanban-relay:latest
-            ghcr.io/harryy2510/vibe-kanban-relay:${{ github.sha }}
-            ghcr.io/harryy2510/vibe-kanban-relay:${{ needs.bump-version.outputs.new_tag }}
+            ghcr.io/harryy2510/vibe-kanban-relay:${{ needs.meta.outputs.tag }}
           cache-from: type=gha
           cache-to: type=gha,mode=max
 

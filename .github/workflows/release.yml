@@ -374,3 +374,11 @@ jobs:
             ghcr.io/harryy2510/vibe-kanban-relay:${{ needs.bump-version.outputs.new_tag }}
           cache-from: type=gha
           cache-to: type=gha,mode=max
+
+  deploy-dokploy:
+    needs: [build-remote-image, build-relay-image]
+    runs-on: ubuntu-latest
+    steps:
+      - name: Trigger Dokploy redeploy
+        run: |
+          curl -fsSL -X POST "${{ secrets.DOKPLOY_WEBHOOK_URL }}"

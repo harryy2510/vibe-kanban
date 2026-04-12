@@ -69,7 +69,8 @@ jobs:
           echo "new_version=$new_version" >> $GITHUB_OUTPUT
           echo "new_tag=$new_tag" >> $GITHUB_OUTPUT
           (cd npx-cli && npm version "$new_version" --no-git-tag-version --allow-same-version)
-          (cd packages/local-web && npm version "$new_version" --no-git-tag-version --allow-same-version)
+          # local-web uses pnpm workspace:* protocol which npm can't parse; edit version field directly
+          node -e "const fs=require('fs'),p='packages/local-web/package.json',j=JSON.parse(fs.readFileSync(p));j.version='$new_version';fs.writeFileSync(p,JSON.stringify(j,null,2)+'\n');"
           cargo set-version --workspace "$new_version"
           # Also bump excluded crates (remote + relay-tunnel are workspace-exclude)
           cargo set-version --manifest-path crates/remote/Cargo.toml "$new_version"

@@ -1,3 +1,5 @@
+> **VibePilot fork notice.** This is the [`harryy2510/vibe-kanban`](https://github.com/harryy2510/vibe-kanban) fork, rebranded as **VibePilot** and hosted at `vibepilot.org`. CLI is published to npm as `@harryy/vibe-kanban`. See [`FORK.md`](FORK.md) for release pipeline, fork deltas, and upstream merge instructions. The rest of this README is from upstream.
+
 <p align="center">
   <a href="https://vibekanban.com">
     <picture>

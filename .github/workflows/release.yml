@@ -10,6 +10,21 @@ on:
         description: 'Tag to release (e.g. v0.1.46-20260412160500)'
         required: true
         type: string
+      cli:
+        description: 'Build CLI binaries + publish npm + upload R2'
+        required: false
+        type: string
+        default: 'true'
+      remote:
+        description: 'Build remote Docker image'
+        required: false
+        type: string
+        default: 'true'
+      relay:
+        description: 'Build relay Docker image'
+        required: false
+        type: string
+        default: 'true'
 
 concurrency:
   group: release-${{ github.ref_name }}
@@ -31,6 +46,9 @@ jobs:
     outputs:
       tag: ${{ steps.derive.outputs.tag }}
       version: ${{ steps.derive.outputs.version }}
+      cli: ${{ steps.derive.outputs.cli }}
+      remote: ${{ steps.derive.outputs.remote }}
+      relay: ${{ steps.derive.outputs.relay }}
     steps:
       - name: Derive tag and version
         id: derive
@@ -44,12 +62,20 @@ jobs:
           fi
           # Extract bare version from tag: "v0.1.46-20260412160500" -> "0.1.46"
           version=$(echo "$tag" | sed -E 's/^v([0-9]+\.[0-9]+\.[0-9]+).*/\1/')
+          # Component flags default to true (build everything) unless dispatch says otherwise.
+          cli="${{ inputs.cli || 'true' }}"
+          remote="${{ inputs.remote || 'true' }}"
+          relay="${{ inputs.relay || 'true' }}"
           echo "tag=$tag" >> $GITHUB_OUTPUT
           echo "version=$version" >> $GITHUB_OUTPUT
-          echo "Releasing tag=$tag version=$version"
+          echo "cli=$cli" >> $GITHUB_OUTPUT
+          echo "remote=$remote" >> $GITHUB_OUTPUT
+          echo "relay=$relay" >> $GITHUB_OUTPUT
+          echo "Releasing tag=$tag version=$version (cli=$cli remote=$remote relay=$relay)"
 
   build-frontend:
     needs: meta
+    if: needs.meta.outputs.cli == 'true'
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v6
@@ -80,6 +106,7 @@ jobs:
 
   build-cli:
     needs: [meta, build-frontend]
+    if: needs.meta.outputs.cli == 'true'
     strategy:
       fail-fast: false
       matrix:
@@ -175,6 +202,7 @@ jobs:
 
   upload-r2:
     needs: [meta, build-cli]
+    if: needs.meta.outputs.cli == 'true'
     runs-on: ubuntu-latest
     steps:
       - name: Download all platform zips
@@ -243,6 +271,7 @@ jobs:
 
   publish-npm:
     needs: [meta, upload-r2]
+    if: needs.meta.outputs.cli == 'true'
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v6
@@ -285,6 +314,7 @@ jobs:
 
   build-remote-image:
     needs: meta
+    if: needs.meta.outputs.remote == 'true'
     runs-on: ubuntu-latest
     permissions:
       contents: read
@@ -323,6 +353,7 @@ jobs:
 
   build-relay-image:
     needs: meta
+    if: needs.meta.outputs.relay == 'true'
     runs-on: ubuntu-latest
     permissions:
       contents: read
@@ -358,7 +389,10 @@ jobs:
           cache-to: type=gha,mode=max
 
   deploy-dokploy:
-    needs: [build-remote-image, build-relay-image]
+    needs: [meta, build-remote-image, build-relay-image]
+    # Run if either image was rebuilt. !cancelled() lets this run even when one of
+    # the image jobs was skipped (due to the other path filter being false).
+    if: "!cancelled() && (needs.meta.outputs.remote == 'true' || needs.meta.outputs.relay == 'true') && !contains(needs.*.result, 'failure')"
     runs-on: ubuntu-latest
     steps:
       - name: Trigger Dokploy redeploy
@@ -366,7 +400,8 @@ jobs:
           curl -fsSL -X POST "${{ secrets.DOKPLOY_WEBHOOK_URL }}"
 
   restart-oxmgr:
-    needs: publish-npm
+    needs: [meta, publish-npm]
+    if: needs.meta.outputs.cli == 'true' && needs.publish-npm.result == 'success'
     runs-on: ubuntu-latest
     steps:
       - name: Restart oxmgr vibe-kanban app

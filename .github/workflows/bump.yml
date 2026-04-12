@@ -28,18 +28,96 @@ jobs:
     # Belt-and-suspenders: GH Actions already honors [skip ci], but this is an
     # explicit guard in case someone triggers via workflow_dispatch on a bump SHA.
     if: "!contains(github.event.head_commit.message, '[skip ci]')"
+    outputs:
+      cli: ${{ steps.changes.outputs.cli }}
+      remote: ${{ steps.changes.outputs.remote }}
+      relay: ${{ steps.changes.outputs.relay }}
     steps:
       - uses: actions/checkout@v6
         with:
           token: ${{ secrets.GITHUB_TOKEN }}
           ssh-key: ${{ secrets.DEPLOY_KEY }}
+          # paths-filter needs at least 2 commits to compare; fetch full history
+          fetch-depth: 0
+
+      - name: Detect which components changed
+        uses: dorny/paths-filter@v3
+        id: changes
+        with:
+          # Shared crates + root files rebuild everything.
+          # Each component lists its own owned paths + shared paths.
+          filters: |
+            shared: &shared
+              - 'Cargo.toml'
+              - 'Cargo.lock'
+              - 'crates/api-types/**'
+              - 'crates/client-info/**'
+              - 'crates/server-info/**'
+              - 'crates/utils/**'
+              - 'crates/trusted-key-auth/**'
+              - 'packages/ui/**'
+              - 'packages/web-core/**'
+              - 'shared/**'
+              - '.github/workflows/release.yml'
+              - '.github/workflows/bump.yml'
+            cli:
+              - *shared
+              - 'crates/server/**'
+              - 'crates/mcp/**'
+              - 'crates/review/**'
+              - 'crates/executors/**'
+              - 'crates/services/**'
+              - 'crates/db/**'
+              - 'crates/git/**'
+              - 'crates/git-host/**'
+              - 'crates/worktree-manager/**'
+              - 'crates/workspace-manager/**'
+              - 'crates/local-deployment/**'
+              - 'crates/deployment/**'
+              - 'crates/embedded-ssh/**'
+              - 'crates/preview-proxy/**'
+              - 'crates/desktop-bridge/**'
+              - 'packages/local-web/**'
+              - 'packages/public/**'
+              - 'npx-cli/**'
+            remote:
+              - *shared
+              - 'crates/remote/**'
+              - 'packages/remote-web/**'
+            relay:
+              - *shared
+              - 'crates/relay-client/**'
+              - 'crates/relay-control/**'
+              - 'crates/relay-hosts/**'
+              - 'crates/relay-protocol/**'
+              - 'crates/relay-tunnel/**'
+              - 'crates/relay-tunnel-core/**'
+              - 'crates/relay-types/**'
+              - 'crates/relay-webrtc/**'
+              - 'crates/relay-ws/**'
+              - 'crates/ws-bridge/**'
+
+      - name: Decide whether to bump
+        id: decide
+        run: |
+          if [[ "${{ steps.changes.outputs.cli }}" == "true" || \
+                "${{ steps.changes.outputs.remote }}" == "true" || \
+                "${{ steps.changes.outputs.relay }}" == "true" ]]; then
+            echo "Will bump: cli=${{ steps.changes.outputs.cli }} remote=${{ steps.changes.outputs.remote }} relay=${{ steps.changes.outputs.relay }}"
+            echo "bump=true" >> $GITHUB_OUTPUT
+          else
+            echo "No component changes; skipping bump"
+            echo "bump=false" >> $GITHUB_OUTPUT
+          fi
 
       - uses: actions/setup-node@v5
+        if: steps.decide.outputs.bump == 'true'
         with:
           node-version: ${{ env.NODE_VERSION }}
           package-manager-cache: false
 
       - name: Install cargo-edit
+        if: steps.decide.outputs.bump == 'true'
         uses: taiki-e/cache-cargo-install-action@34ce5120836e5f9f1508d8713d7fdea0e8facd6f
         with:
           tool: cargo-edit
@@ -47,6 +125,7 @@ jobs:
           rev: 96a3879fe3bafda6d0f943b642997fbf03e235cd
 
       - name: Determine new version
+        if: steps.decide.outputs.bump == 'true'
         id: version
         run: |
           latest_npm=$(npm view @harryy/vibe-kanban version 2>/dev/null || echo "0.0.0")
@@ -76,6 +155,7 @@ jobs:
           cargo set-version --manifest-path crates/relay-tunnel/Cargo.toml "$new_version"
 
       - name: Commit and tag
+        if: steps.decide.outputs.bump == 'true'
         run: |
           git config user.name "vibepilot-ci"
           git config user.email "ci@vibepilot.org"
@@ -88,10 +168,14 @@ jobs:
           git push origin "${{ steps.version.outputs.new_tag }}"
 
       - name: Trigger release workflow
+        if: steps.decide.outputs.bump == 'true'
         env:
           GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
         run: |
           gh workflow run release.yml \
             --repo ${{ github.repository }} \
             --ref main \
-            -f tag="${{ steps.version.outputs.new_tag }}"
+            -f tag="${{ steps.version.outputs.new_tag }}" \
+            -f cli="${{ steps.changes.outputs.cli }}" \
+            -f remote="${{ steps.changes.outputs.remote }}" \
+            -f relay="${{ steps.changes.outputs.relay }}"

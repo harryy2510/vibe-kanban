@@ -204,3 +204,70 @@ jobs:
           name: cli-${{ matrix.name }}
           path: dist/${{ matrix.name }}/
           retention-days: 1
+
+  upload-r2:
+    needs: [bump-version, build-cli]
+    runs-on: ubuntu-latest
+    steps:
+      - name: Download all platform zips
+        uses: actions/download-artifact@v7
+        with:
+          pattern: cli-*
+          path: binaries/
+          merge-multiple: false
+
+      - name: Flatten layout
+        run: |
+          mkdir -p flat
+          for dir in binaries/cli-*; do
+            platform=${dir#binaries/cli-}
+            mkdir -p flat/$platform
+            cp $dir/*.zip flat/$platform/
+          done
+          find flat/
+
+      - name: Generate manifest
+        run: |
+          node -e "
+            const fs=require('fs'), crypto=require('crypto');
+            const manifest={version:'${{ needs.bump-version.outputs.new_tag }}',platforms:{}};
+            const platforms=['linux-x64','linux-arm64','macos-x64','macos-arm64','windows-x64'];
+            const binaries=['vibe-kanban','vibe-kanban-mcp','vibe-kanban-review'];
+            for (const p of platforms) {
+              manifest.platforms[p]={};
+              for (const b of binaries) {
+                const zp='flat/'+p+'/'+b+'.zip';
+                if (fs.existsSync(zp)) {
+                  const d=fs.readFileSync(zp);
+                  manifest.platforms[p][b]={sha256:crypto.createHash('sha256').update(d).digest('hex'),size:d.length};
+                }
+              }
+            }
+            fs.writeFileSync('manifest.json', JSON.stringify(manifest,null,2));
+          "
+          cat manifest.json
+
+      - name: Configure AWS CLI for R2
+        run: |
+          aws configure set aws_access_key_id ${{ secrets.R2_BINARIES_ACCESS_KEY_ID }}
+          aws configure set aws_secret_access_key ${{ secrets.R2_BINARIES_SECRET_ACCESS_KEY }}
+          aws configure set default.region auto
+
+      - name: Upload zips to R2
+        env:
+          ENDPOINT: ${{ vars.R2_BINARIES_ENDPOINT }}
+          BUCKET: ${{ vars.R2_BINARIES_BUCKET }}
+          TAG: ${{ needs.bump-version.outputs.new_tag }}
+        run: |
+          for platform in linux-x64 linux-arm64 macos-x64 macos-arm64 windows-x64; do
+            for b in vibe-kanban vibe-kanban-mcp vibe-kanban-review; do
+              if [ -f "flat/$platform/$b.zip" ]; then
+                aws s3 cp "flat/$platform/$b.zip" \
+                  "s3://$BUCKET/binaries/$TAG/$platform/$b.zip" \
+                  --endpoint-url "$ENDPOINT"
+              fi
+            done
+          done
+          aws s3 cp manifest.json "s3://$BUCKET/binaries/$TAG/manifest.json" --endpoint-url "$ENDPOINT" --content-type application/json
+          echo "{\"latest\": \"${{ needs.bump-version.outputs.new_version }}\"}" | \
+            aws s3 cp - "s3://$BUCKET/binaries/manifest.json" --endpoint-url "$ENDPOINT" --content-type application/json

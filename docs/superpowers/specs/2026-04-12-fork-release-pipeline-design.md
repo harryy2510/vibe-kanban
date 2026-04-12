@@ -59,7 +59,10 @@ Supporting stack (already deployed via Dokploy, no pipeline changes): postgres, 
       |        → push ghcr.io/harryy2510/vibe-kanban-relay:<sha>
       |
       +--> job: dokploy-redeploy  (needs: remote-image, relay-image)
-               curl -X POST $DOKPLOY_WEBHOOK_URL
+      |        curl -X POST $DOKPLOY_WEBHOOK_URL
+      |
+      +--> job: oxmgr-restart   (needs: cli-pipeline)
+               ssh to server, run `oxmgr restart vibe-kanban`
 ```
 
 **Path filters on jobs:**
@@ -136,6 +139,9 @@ Supporting stack (already deployed via Dokploy, no pipeline changes): postgres, 
 | `R2_BINARIES_PUBLIC_URL` | `https://binaries.vibepilot.org` |
 | `NPM_TOKEN` | npmjs.com Automation token scoped to `@harryy2510` |
 | `DOKPLOY_WEBHOOK_URL` | Redeploy webhook for the Dokploy stack |
+| `SERVER_SSH_HOST` | Host where oxmgr + vibe-kanban run (e.g. `server.hariom.cc`) |
+| `SERVER_SSH_USER` | SSH user with permission to run `oxmgr` (e.g. `ubuntu`) |
+| `SERVER_SSH_KEY` | Private SSH key authorized for that user |
 
 All upstream secrets removed: `VK_PRIVATE_DEPLOY_KEY`, `SENTRY_*`, `POSTHOG_*`, `APPLE_*`, `AZURE_*` (code-signing, not Azurite), `APP_STORE_API_KEY`, `TAURI_SIGNING_*`, `PUBLIC_REACT_VIRTUOSO_LICENSE_KEY`, `VK_SHARED_API_BASE`, `VK_SHARED_RELAY_API_BASE`, `REMOTE_DEPLOYMENT_TOKEN`.
 
@@ -172,6 +178,25 @@ Point each subdomain per the Domain map. TLS via Let's Encrypt is already handle
 ```
 bunx -y @harryy2510/vibe-kanban@latest mcp
 ```
+
+**oxmgr on the Dokploy host (runs the local vibe-kanban daemon):**
+
+`oxfile.toml` command and env values need to be updated as part of the rebrand:
+
+```toml
+[[apps]]
+name = "vibe-kanban"
+command = "bunx -y @harryy2510/vibe-kanban@latest"
+health_cmd = "curl -fsS http://localhost:4040"
+
+[apps.env]
+VK_SHARED_API_BASE = "https://api.vibepilot.org"
+VK_SHARED_RELAY_API_BASE = "https://relay.vibepilot.org"
+PORT = "4040"
+HOST = "0.0.0.0"
+```
+
+CI auto-restarts this app after each successful CLI publish via SSH: `oxmgr restart vibe-kanban`. The sibling `autopilot` oxmgr app (from the vibe-pilot repo) is untouched -- it has its own deploy story.
 
 **Web app:** `https://vibepilot.org`
 

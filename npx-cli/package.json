@@ -1,5 +1,5 @@
 {
-  "name": "vibe-kanban",
+  "name": "@harryy/vibe-kanban",
   "private": false,
   "version": "0.1.44",
   "main": "index.js",
@@ -11,16 +11,16 @@
     "check": "tsc --noEmit -p tsconfig.json"
   },
   "keywords": [],
-  "author": "bloop",
+  "author": "harryy2510",
   "repository": {
     "type": "git",
-    "url": "https://github.com/BloopAI/vibe-kanban"
+    "url": "https://github.com/harryy2510/vibe-kanban"
   },
   "engines": {
     "node": ">=20.19.0"
   },
   "license": "",
-  "description": "NPX wrapper around vibe-kanban and vibe-kanban-mcp",
+  "description": "VibePilot fork of vibe-kanban CLI (npx wrapper for binaries)",
   "devDependencies": {
     "esbuild": "^0.27.2"
   },

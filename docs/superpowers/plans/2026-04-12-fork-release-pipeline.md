@@ -21,7 +21,6 @@
 - `npx-cli/package.json` — rename to `@harryy/vibe-kanban`, update repo URL
 - `crates/remote/Cargo.toml` — strip billing dep + feature flag
 - `crates/review/src/main.rs` — change `DEFAULT_API_URL` default
-- `oxfile.toml` — update command + env for new package + domains
 - `.github/workflows/test.yml` — remove SSH agent step
 
 **Delete:**
@@ -33,8 +32,11 @@
 - `.github/workflows/relay-deploy-dev.yml`
 - `.github/workflows/relay-deploy-prod.yml`
 - `.github/workflows/relay-release.yml`
-- `update.sh` (replaced by workflow)
-- `setup-gh.sh` (was ignored; leaving it alone — user deletes manually)
+
+**Already handled (prior commits, not part of this plan):**
+- `oxfile.toml`, `docker-compose.yaml` — moved to `../vibe-pilot` repo (they're deployment config, not source)
+- `update.sh` — deleted (replaced by `release.yml` workflow)
+- `setup-gh.sh` — gitignored; user deletes manually after bootstrapping secrets
 
 **Not changed (deferred):**
 - All `docs/**/*.mdx` references — docs aren't deployed by this pipeline, low priority
@@ -194,48 +196,14 @@ git commit -m "fork: rename npm package to @harryy/vibe-kanban"
 
 ---
 
-## Task 4: Update oxfile.toml for new package + domains
+## Task 4: Delete unused upstream workflows
+
+**Note:** `oxfile.toml`, `docker-compose.yaml`, and `update.sh` already moved to the `vibe-pilot` repo (or deleted) in a prior commit. This task only deletes workflow files.
 
 **Files:**
-- Modify: `oxfile.toml`
+- Delete: 8 workflow files
 
-- [ ] **Step 1: Replace oxfile.toml contents**
-
-```toml
-version = 1
-
-[defaults]
-restart_policy = "on_failure"
-max_restarts = 10
-stop_timeout_secs = 5
-
-[[apps]]
-name = "vibe-kanban"
-command = "bunx -y @harryy/vibe-kanban@latest"
-health_cmd = "curl -fsS http://localhost:4040"
-
-[apps.env]
-VK_SHARED_API_BASE = "https://api.vibepilot.org"
-VK_SHARED_RELAY_API_BASE = "https://relay.vibepilot.org"
-PORT = "4040"
-HOST = "0.0.0.0"
-```
-
-- [ ] **Step 2: Commit**
-
-```bash
-git add oxfile.toml
-git commit -m "fork: point oxfile.toml at @harryy/vibe-kanban + vibepilot.org"
-```
-
----
-
-## Task 5: Delete unused upstream workflows and update.sh
-
-**Files:**
-- Delete: 8 workflow files + `update.sh`
-
-- [ ] **Step 1: Delete upstream release/deploy workflows and update.sh**
+- [ ] **Step 1: Delete upstream release/deploy workflows**
 
 ```bash
 git rm \
@@ -246,19 +214,18 @@ git rm \
   .github/workflows/remote-release.yml \
   .github/workflows/relay-deploy-dev.yml \
   .github/workflows/relay-deploy-prod.yml \
-  .github/workflows/relay-release.yml \
-  update.sh
+  .github/workflows/relay-release.yml
 ```
 
 - [ ] **Step 2: Commit**
 
 ```bash
-git commit -m "fork: remove upstream release/deploy workflows and update.sh"
+git commit -m "fork: remove upstream release/deploy workflows"
 ```
 
 ---
 
-## Task 6: Strip SSH agent step from test.yml
+## Task 5: Strip SSH agent step from test.yml
 
 **Files:**
 - Modify: `.github/workflows/test.yml` (lines around 246)
@@ -304,7 +271,7 @@ git commit -m "fork: remove VK_PRIVATE_DEPLOY_KEY SSH agent step from test.yml"
 
 ---
 
-## Task 7: Create release.yml — workflow skeleton + bump-version job
+## Task 6: Create release.yml — workflow skeleton + bump-version job
 
 **Files:**
 - Create: `.github/workflows/release.yml`
@@ -412,7 +379,7 @@ git commit -m "ci: add release.yml skeleton with bump-version job"
 
 ---
 
-## Task 8: Add build-frontend job
+## Task 7: Add build-frontend job
 
 **Files:**
 - Modify: `.github/workflows/release.yml`
@@ -466,7 +433,7 @@ git commit -m "ci: add build-frontend job to release workflow"
 
 ---
 
-## Task 9: Add build-cli matrix job (5 platforms)
+## Task 8: Add build-cli matrix job (5 platforms)
 
 **Files:**
 - Modify: `.github/workflows/release.yml`
@@ -585,7 +552,7 @@ git commit -m "ci: add build-cli matrix for 5 platforms"
 
 ---
 
-## Task 10: Add upload-r2 job
+## Task 9: Add upload-r2 job
 
 **Files:**
 - Modify: `.github/workflows/release.yml`
@@ -675,7 +642,7 @@ git commit -m "ci: upload CLI zips + manifest to R2"
 
 ---
 
-## Task 11: Add publish-npm job
+## Task 10: Add publish-npm job
 
 **Files:**
 - Modify: `.github/workflows/release.yml`
@@ -739,7 +706,7 @@ git commit -m "ci: add publish-npm job"
 
 ---
 
-## Task 12: Add build-remote-image job
+## Task 11: Add build-remote-image job
 
 **Files:**
 - Modify: `.github/workflows/release.yml`
@@ -794,7 +761,7 @@ git commit -m "ci: add build-remote-image job"
 
 ---
 
-## Task 13: Add build-relay-image job
+## Task 12: Add build-relay-image job
 
 **Files:**
 - Modify: `.github/workflows/release.yml`
@@ -847,7 +814,7 @@ git commit -m "ci: add build-relay-image job"
 
 ---
 
-## Task 14: Add deploy-dokploy job
+## Task 13: Add deploy-dokploy job
 
 **Files:**
 - Modify: `.github/workflows/release.yml`
@@ -878,7 +845,7 @@ git commit -m "ci: add deploy-dokploy webhook trigger"
 
 ---
 
-## Task 15: Add restart-oxmgr job
+## Task 14: Add restart-oxmgr job
 
 **Files:**
 - Modify: `.github/workflows/release.yml`
@@ -919,7 +886,7 @@ git commit -m "ci: add restart-oxmgr job after npm publish"
 
 ---
 
-## Task 16: Merge + verify first run
+## Task 15: Merge + verify first run
 
 **Files:**
 - None (push + observe)
@@ -998,7 +965,7 @@ Expected: binary downloads from `binaries.vibepilot.org`, sha256 passes, MCP sta
 
 ---
 
-## Task 17: Post-bootstrap — migrate to npm Trusted Publishing
+## Task 16: Post-bootstrap — migrate to npm Trusted Publishing
 
 **Files:**
 - Modify: `.github/workflows/release.yml` (publish-npm job)

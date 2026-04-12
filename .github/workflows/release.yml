@@ -324,6 +324,7 @@ jobs:
         with:
           ref: ${{ needs.meta.outputs.tag }}
 
+      - uses: docker/setup-qemu-action@v3
       - uses: docker/setup-buildx-action@v3
 
       - name: Log in to GHCR
@@ -339,6 +340,7 @@ jobs:
           context: .
           file: crates/remote/Dockerfile
           push: true
+          platforms: linux/amd64,linux/arm64
           tags: |
             ghcr.io/${{ github.repository }}/remote:latest
             ghcr.io/${{ github.repository }}/remote:${{ needs.meta.outputs.tag }}
@@ -363,6 +365,7 @@ jobs:
         with:
           ref: ${{ needs.meta.outputs.tag }}
 
+      - uses: docker/setup-qemu-action@v3
       - uses: docker/setup-buildx-action@v3
 
       - name: Log in to GHCR
@@ -378,6 +381,7 @@ jobs:
           context: .
           file: crates/relay-tunnel/Dockerfile
           push: true
+          platforms: linux/amd64,linux/arm64
           tags: |
             ghcr.io/${{ github.repository }}/relay:latest
             ghcr.io/${{ github.repository }}/relay:${{ needs.meta.outputs.tag }}

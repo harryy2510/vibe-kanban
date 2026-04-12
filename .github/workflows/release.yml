@@ -271,3 +271,44 @@ jobs:
           aws s3 cp manifest.json "s3://$BUCKET/binaries/$TAG/manifest.json" --endpoint-url "$ENDPOINT" --content-type application/json
           echo "{\"latest\": \"${{ needs.bump-version.outputs.new_version }}\"}" | \
             aws s3 cp - "s3://$BUCKET/binaries/manifest.json" --endpoint-url "$ENDPOINT" --content-type application/json
+
+  publish-npm:
+    needs: [bump-version, upload-r2]
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v6
+        with:
+          ref: ${{ needs.bump-version.outputs.new_tag }}
+
+      - uses: actions/setup-node@v5
+        with:
+          node-version: ${{ env.NODE_VERSION }}
+          registry-url: 'https://registry.npmjs.org'
+
+      - name: Install npx-cli deps
+        run: cd npx-cli && npm ci
+
+      - name: Build npx-cli
+        run: cd npx-cli && npm run build
+
+      - name: Bake R2 URL and tag into bundle
+        run: |
+          cd npx-cli
+          sed -i "s|__R2_PUBLIC_URL__|${{ vars.R2_BINARIES_PUBLIC_URL }}|g" bin/cli.js
+          sed -i "s|__BINARY_TAG__|${{ needs.bump-version.outputs.new_tag }}|g" bin/cli.js
+
+      - name: Pack and publish
+        run: |
+          cd npx-cli
+          npm pack
+          npm publish *.tgz --access public
+        env:
+          NODE_AUTH_TOKEN: ${{ secrets.NPM_TOKEN }}
+
+      - name: Attach tgz to GitHub release
+        uses: softprops/action-gh-release@153bb8e04406b158c6c84fc1615b65b24149a1fe
+        with:
+          tag_name: ${{ needs.bump-version.outputs.new_tag }}
+          generate_release_notes: true
+          files: |
+            npx-cli/*.tgz

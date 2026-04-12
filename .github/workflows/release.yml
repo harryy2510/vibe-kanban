@@ -81,7 +81,8 @@ jobs:
         run: |
           git config user.name "vibepilot-ci"
           git config user.email "ci@vibepilot.org"
-          git add package.json npx-cli/package.json packages/local-web/package.json Cargo.toml crates/*/Cargo.toml Cargo.lock crates/remote/Cargo.toml crates/remote/Cargo.lock crates/relay-tunnel/Cargo.toml 2>/dev/null || true
+          git add -u
+          git status --short
           git commit -m "chore: bump version to ${{ steps.version.outputs.new_version }}"
           git pull --rebase origin main
           git tag "${{ steps.version.outputs.new_tag }}"

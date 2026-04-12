@@ -315,7 +315,17 @@ jobs:
   build-remote-image:
     needs: meta
     if: needs.meta.outputs.remote == 'true'
-    runs-on: ubuntu-latest
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - platform: linux/amd64
+            runner: ubuntu-latest
+            arch: amd64
+          - platform: linux/arm64
+            runner: ubuntu-24.04-arm
+            arch: arm64
+    runs-on: ${{ matrix.runner }}
     permissions:
       contents: read
       packages: write
@@ -324,7 +334,6 @@ jobs:
         with:
           ref: ${{ needs.meta.outputs.tag }}
 
-      - uses: docker/setup-qemu-action@v3
       - uses: docker/setup-buildx-action@v3
 
       - name: Log in to GHCR
@@ -334,38 +343,52 @@ jobs:
           username: ${{ github.actor }}
           password: ${{ secrets.GITHUB_TOKEN }}
 
-      - name: Build and push
+      - name: Build and push by digest
+        id: build
         uses: docker/build-push-action@v6
         with:
           context: .
           file: crates/remote/Dockerfile
-          push: true
-          platforms: linux/amd64,linux/arm64
-          tags: |
-            ghcr.io/${{ github.repository }}/remote:latest
-            ghcr.io/${{ github.repository }}/remote:${{ needs.meta.outputs.tag }}
+          platforms: ${{ matrix.platform }}
           labels: |
             org.opencontainers.image.source=https://github.com/${{ github.repository }}
             org.opencontainers.image.description=VibePilot remote API service
             org.opencontainers.image.licenses=MIT
           build-args: |
             VITE_RELAY_API_BASE_URL=https://relay.vibepilot.org
-          cache-from: type=gha
-          cache-to: type=gha,mode=max
+          cache-from: type=gha,scope=remote-${{ matrix.arch }}
+          cache-to: type=gha,mode=max,scope=remote-${{ matrix.arch }}
+          outputs: type=image,name=ghcr.io/${{ github.repository }}/remote,push-by-digest=true,name-canonical=true,push=true
 
-  build-relay-image:
-    needs: meta
-    if: needs.meta.outputs.relay == 'true'
+      - name: Export digest
+        run: |
+          mkdir -p /tmp/digests
+          digest="${{ steps.build.outputs.digest }}"
+          touch "/tmp/digests/${digest#sha256:}"
+
+      - name: Upload digest
+        uses: actions/upload-artifact@v6
+        with:
+          name: digests-remote-${{ matrix.arch }}
+          path: /tmp/digests/*
+          if-no-files-found: error
+          retention-days: 1
+
+  build-remote-manifest:
+    needs: [meta, build-remote-image]
+    if: needs.meta.outputs.remote == 'true'
     runs-on: ubuntu-latest
     permissions:
       contents: read
       packages: write
     steps:
-      - uses: actions/checkout@v6
+      - name: Download digests
+        uses: actions/download-artifact@v7
         with:
-          ref: ${{ needs.meta.outputs.tag }}
+          pattern: digests-remote-*
+          path: /tmp/digests
+          merge-multiple: true
 
-      - uses: docker/setup-qemu-action@v3
       - uses: docker/setup-buildx-action@v3
 
       - name: Log in to GHCR
@@ -375,27 +398,116 @@ jobs:
           username: ${{ github.actor }}
           password: ${{ secrets.GITHUB_TOKEN }}
 
-      - name: Build and push
+      - name: Create manifest list and push
+        working-directory: /tmp/digests
+        run: |
+          docker buildx imagetools create \
+            -t ghcr.io/${{ github.repository }}/remote:latest \
+            -t ghcr.io/${{ github.repository }}/remote:${{ needs.meta.outputs.tag }} \
+            $(printf 'ghcr.io/${{ github.repository }}/remote@sha256:%s ' *)
+
+      - name: Inspect image
+        run: docker buildx imagetools inspect ghcr.io/${{ github.repository }}/remote:${{ needs.meta.outputs.tag }}
+
+  build-relay-image:
+    needs: meta
+    if: needs.meta.outputs.relay == 'true'
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - platform: linux/amd64
+            runner: ubuntu-latest
+            arch: amd64
+          - platform: linux/arm64
+            runner: ubuntu-24.04-arm
+            arch: arm64
+    runs-on: ${{ matrix.runner }}
+    permissions:
+      contents: read
+      packages: write
+    steps:
+      - uses: actions/checkout@v6
+        with:
+          ref: ${{ needs.meta.outputs.tag }}
+
+      - uses: docker/setup-buildx-action@v3
+
+      - name: Log in to GHCR
+        uses: docker/login-action@v3
+        with:
+          registry: ghcr.io
+          username: ${{ github.actor }}
+          password: ${{ secrets.GITHUB_TOKEN }}
+
+      - name: Build and push by digest
+        id: build
         uses: docker/build-push-action@v6
         with:
           context: .
           file: crates/relay-tunnel/Dockerfile
-          push: true
-          platforms: linux/amd64,linux/arm64
-          tags: |
-            ghcr.io/${{ github.repository }}/relay:latest
-            ghcr.io/${{ github.repository }}/relay:${{ needs.meta.outputs.tag }}
+          platforms: ${{ matrix.platform }}
           labels: |
             org.opencontainers.image.source=https://github.com/${{ github.repository }}
             org.opencontainers.image.description=VibePilot relay tunnel service
             org.opencontainers.image.licenses=MIT
-          cache-from: type=gha
-          cache-to: type=gha,mode=max
+          cache-from: type=gha,scope=relay-${{ matrix.arch }}
+          cache-to: type=gha,mode=max,scope=relay-${{ matrix.arch }}
+          outputs: type=image,name=ghcr.io/${{ github.repository }}/relay,push-by-digest=true,name-canonical=true,push=true
+
+      - name: Export digest
+        run: |
+          mkdir -p /tmp/digests
+          digest="${{ steps.build.outputs.digest }}"
+          touch "/tmp/digests/${digest#sha256:}"
+
+      - name: Upload digest
+        uses: actions/upload-artifact@v6
+        with:
+          name: digests-relay-${{ matrix.arch }}
+          path: /tmp/digests/*
+          if-no-files-found: error
+          retention-days: 1
+
+  build-relay-manifest:
+    needs: [meta, build-relay-image]
+    if: needs.meta.outputs.relay == 'true'
+    runs-on: ubuntu-latest
+    permissions:
+      contents: read
+      packages: write
+    steps:
+      - name: Download digests
+        uses: actions/download-artifact@v7
+        with:
+          pattern: digests-relay-*
+          path: /tmp/digests
+          merge-multiple: true
+
+      - uses: docker/setup-buildx-action@v3
+
+      - name: Log in to GHCR
+        uses: docker/login-action@v3
+        with:
+          registry: ghcr.io
+          username: ${{ github.actor }}
+          password: ${{ secrets.GITHUB_TOKEN }}
+
+      - name: Create manifest list and push
+        working-directory: /tmp/digests
+        run: |
+          docker buildx imagetools create \
+            -t ghcr.io/${{ github.repository }}/relay:latest \
+            -t ghcr.io/${{ github.repository }}/relay:${{ needs.meta.outputs.tag }} \
+            $(printf 'ghcr.io/${{ github.repository }}/relay@sha256:%s ' *)
+
+      - name: Inspect image
+        run: docker buildx imagetools inspect ghcr.io/${{ github.repository }}/relay:${{ needs.meta.outputs.tag }}
 
   deploy-dokploy:
-    needs: [meta, build-remote-image, build-relay-image]
+    needs: [meta, build-remote-manifest, build-relay-manifest]
     # Run if either image was rebuilt. !cancelled() lets this run even when one of
-    # the image jobs was skipped (due to the other path filter being false).
+    # the manifest jobs was skipped (due to the other path filter being false).
     if: "!cancelled() && (needs.meta.outputs.remote == 'true' || needs.meta.outputs.relay == 'true') && !contains(needs.*.result, 'failure')"
     runs-on: ubuntu-latest
     steps:

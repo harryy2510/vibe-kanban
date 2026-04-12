@@ -1,6 +1,6 @@
 [package]
 name = "remote"
-version = "0.1.26"
+version = "0.1.27"
 edition = "2024"
 publish = false
 
@@ -10,12 +10,9 @@ path = "src/bin/generate_types.rs"
 
 [features]
 default = []
-vk-billing = ["dep:billing"]
+vk-billing = []
 
 [dependencies]
-# private crate for billing functionality
-billing = { git = "ssh://git@github.com/BloopAI/vibe-kanban-private", branch = "main", package = "billing", optional = true }
-
 anyhow = "1.0"
 axum = { version = "0.8.4", features = ["macros", "multipart", "ws"] }
 axum-extra = { version = "0.10.3", features = ["typed-header"] }
@@ -67,6 +64,8 @@ image = { version = "0.25", default-features = false, features = ["jpeg", "png",
 tempfile = "3"
 tar = "0.4"
 flate2 = "1.0"
+csv = "1.3"
+zip = { version = "2", default-features = false, features = ["deflate"] }
 
 
 [workspace]

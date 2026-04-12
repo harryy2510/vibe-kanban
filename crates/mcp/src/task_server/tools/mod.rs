@@ -429,6 +429,7 @@ mod tests {
             "git_push".to_string(),
             "git_status".to_string(),
             "list_sessions".to_string(),
+            "list_workspace_repos".to_string(),
             "run_session_prompt".to_string(),
             "stop_execution".to_string(),
             "update_session".to_string(),

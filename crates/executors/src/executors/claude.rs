@@ -62,7 +62,7 @@ fn base_command(claude_code_router: bool) -> &'static str {
     if claude_code_router {
         "npx -y @musistudio/claude-code-router@1.0.66 code"
     } else {
-        "npx -y @anthropic-ai/claude-code@2.1.62"
+        "npx -y @anthropic-ai/claude-code@2.1.92"
     }
 }
 
@@ -184,8 +184,6 @@ impl ClaudeCode {
         if let Some(agent) = &self.agent {
             builder = builder.extend_params(["--agent", agent]);
         }
-        // Pass user-installed plugin directories so skills are available in workspace sessions
-        // See: https://github.com/BloopAI/vibe-kanban/issues/2626
         for dir in Self::discover_plugin_dirs() {
             builder = builder.extend_params(["--plugin-dir", &dir.to_string_lossy()]);
         }
@@ -211,8 +209,6 @@ impl ClaudeCode {
     }
 
     /// Scan ~/.claude/settings.json for enabled plugins and resolve their cache paths.
-    /// Returns plugin directories that should be passed as --plugin-dir to Claude Code.
-    /// See: https://github.com/BloopAI/vibe-kanban/issues/2626
     fn discover_plugin_dirs() -> Vec<PathBuf> {
         let home = match dirs::home_dir() {
             Some(h) => h,
@@ -237,14 +233,12 @@ impl ClaudeCode {
             if val.as_bool() != Some(true) {
                 continue;
             }
-            // key format: "plugin-name@marketplace-name"
             let parts: Vec<&str> = key.splitn(2, '@').collect();
             if parts.len() != 2 {
                 continue;
             }
             let (plugin_name, marketplace) = (parts[0], parts[1]);
             let plugin_base = cache_dir.join(marketplace).join(plugin_name);
-            // Find the latest version directory (sorted descending so newest is first)
             if let Ok(entries) = std::fs::read_dir(&plugin_base) {
                 let mut versions: Vec<PathBuf> = entries
                     .filter_map(|e| e.ok())

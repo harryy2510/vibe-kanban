@@ -1,0 +1,404 @@
+name: Release
+
+on:
+  push:
+    branches:
+      - main
+    paths-ignore:
+      - 'docs/**'
+      - 'README.md'
+      - '.gitignore'
+  workflow_dispatch:
+
+concurrency:
+  group: release-${{ github.ref_name }}
+  cancel-in-progress: false
+
+permissions:
+  contents: write
+  packages: write
+  id-token: write
+
+env:
+  NODE_VERSION: 22
+  PNPM_VERSION: 10.13.1
+  RUST_TOOLCHAIN: nightly-2025-12-04
+
+jobs:
+  bump-version:
+    runs-on: ubuntu-latest
+    outputs:
+      new_tag: ${{ steps.version.outputs.new_tag }}
+      new_version: ${{ steps.version.outputs.new_version }}
+    steps:
+      - uses: actions/checkout@v6
+        with:
+          token: ${{ secrets.GITHUB_TOKEN }}
+          ssh-key: ${{ secrets.DEPLOY_KEY }}
+
+      - uses: actions/setup-node@v5
+        with:
+          node-version: ${{ env.NODE_VERSION }}
+
+      - name: Install cargo-edit
+        uses: taiki-e/cache-cargo-install-action@34ce5120836e5f9f1508d8713d7fdea0e8facd6f
+        with:
+          tool: cargo-edit
+          git: https://github.com/killercup/cargo-edit
+          rev: 96a3879fe3bafda6d0f943b642997fbf03e235cd
+
+      - name: Determine new version
+        id: version
+        run: |
+          latest_npm=$(npm view @harryy/vibe-kanban version 2>/dev/null || echo "0.0.0")
+          current=$(node -p "require('./package.json').version")
+          base=$(node -e "
+            const a='$latest_npm'.split('.').map(Number), b='$current'.split('.').map(Number);
+            for (let i=0;i<3;i++){
+              if ((a[i]||0)>(b[i]||0)){console.log('$latest_npm');process.exit()}
+              if ((a[i]||0)<(b[i]||0)){console.log('$current');process.exit()}
+            }
+            console.log('$current')
+          ")
+          npm version "$base" --no-git-tag-version --allow-same-version
+          npm version patch --no-git-tag-version
+          new_version=$(node -p "require('./package.json').version")
+          timestamp=$(date +%Y%m%d%H%M%S)
+          new_tag="v${new_version}-${timestamp}"
+          echo "new_version=$new_version" >> $GITHUB_OUTPUT
+          echo "new_tag=$new_tag" >> $GITHUB_OUTPUT
+          (cd npx-cli && npm version "$new_version" --no-git-tag-version --allow-same-version)
+          (cd packages/local-web && npm version "$new_version" --no-git-tag-version --allow-same-version)
+          cargo set-version --workspace "$new_version"
+          # Also bump excluded crates (remote + relay-tunnel are workspace-exclude)
+          cargo set-version --manifest-path crates/remote/Cargo.toml "$new_version"
+          cargo set-version --manifest-path crates/relay-tunnel/Cargo.toml "$new_version"
+
+      - name: Commit and tag
+        run: |
+          git config user.name "vibepilot-ci"
+          git config user.email "ci@vibepilot.org"
+          git add package.json npx-cli/package.json packages/local-web/package.json Cargo.toml crates/*/Cargo.toml Cargo.lock crates/remote/Cargo.toml crates/remote/Cargo.lock crates/relay-tunnel/Cargo.toml 2>/dev/null || true
+          git commit -m "chore: bump version to ${{ steps.version.outputs.new_version }}"
+          git pull --rebase origin main
+          git tag "${{ steps.version.outputs.new_tag }}"
+          git push origin HEAD:main
+          git push origin "${{ steps.version.outputs.new_tag }}"
+
+  build-frontend:
+    needs: bump-version
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v6
+        with:
+          ref: ${{ needs.bump-version.outputs.new_tag }}
+
+      - uses: actions/setup-node@v5
+        with:
+          node-version: ${{ env.NODE_VERSION }}
+
+      - uses: pnpm/action-setup@v4
+        with:
+          version: ${{ env.PNPM_VERSION }}
+
+      - name: Install dependencies
+        run: pnpm install --frozen-lockfile
+
+      - name: Build local-web
+        run: pnpm -C packages/local-web build
+
+      - name: Upload frontend artifact
+        uses: actions/upload-artifact@v6
+        with:
+          name: frontend-dist
+          path: packages/local-web/dist/
+          retention-days: 1
+
+  build-cli:
+    needs: [bump-version, build-frontend]
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - target: x86_64-unknown-linux-musl
+            os: ubuntu-latest
+            name: linux-x64
+          - target: aarch64-unknown-linux-musl
+            os: ubuntu-latest
+            name: linux-arm64
+          - target: x86_64-apple-darwin
+            os: macos-latest
+            name: macos-x64
+          - target: aarch64-apple-darwin
+            os: macos-latest
+            name: macos-arm64
+          - target: x86_64-pc-windows-msvc
+            os: windows-latest
+            name: windows-x64
+    runs-on: ${{ matrix.os }}
+    steps:
+      - uses: actions/checkout@v6
+        with:
+          ref: ${{ needs.bump-version.outputs.new_tag }}
+
+      - uses: dtolnay/rust-toolchain@master
+        with:
+          toolchain: ${{ env.RUST_TOOLCHAIN }}
+          targets: ${{ matrix.target }}
+
+      - uses: Swatinem/rust-cache@v2
+        with:
+          key: ${{ matrix.target }}
+
+      - name: Download frontend artifact
+        uses: actions/download-artifact@v7
+        with:
+          name: frontend-dist
+          path: packages/local-web/dist/
+
+      - name: Install Linux build deps
+        if: runner.os == 'Linux'
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y musl-tools clang libclang-dev
+
+      - name: Install cross for Linux arm64
+        if: matrix.target == 'aarch64-unknown-linux-musl'
+        uses: taiki-e/install-action@v2
+        with:
+          tool: cross
+
+      - name: Build (Linux arm64 via cross)
+        if: matrix.target == 'aarch64-unknown-linux-musl'
+        shell: bash
+        run: cross build --release --target ${{ matrix.target }} -p server -p mcp -p review --bin server --bin vibe-kanban-mcp --bin review
+
+      - name: Build (native)
+        if: matrix.target != 'aarch64-unknown-linux-musl'
+        shell: bash
+        run: cargo build --release --target ${{ matrix.target }} -p server -p mcp -p review --bin server --bin vibe-kanban-mcp --bin review
+
+      - name: Package zips (Unix)
+        if: runner.os != 'Windows'
+        shell: bash
+        run: |
+          mkdir -p dist/${{ matrix.name }}
+          cd target/${{ matrix.target }}/release
+          mv server vibe-kanban
+          zip ../../../dist/${{ matrix.name }}/vibe-kanban.zip vibe-kanban
+          zip ../../../dist/${{ matrix.name }}/vibe-kanban-mcp.zip vibe-kanban-mcp
+          mv review vibe-kanban-review
+          zip ../../../dist/${{ matrix.name }}/vibe-kanban-review.zip vibe-kanban-review
+
+      - name: Package zips (Windows)
+        if: runner.os == 'Windows'
+        shell: pwsh
+        run: |
+          New-Item -ItemType Directory -Force -Path dist/${{ matrix.name }}
+          cd target/${{ matrix.target }}/release
+          Rename-Item server.exe vibe-kanban.exe
+          Compress-Archive -Path vibe-kanban.exe -DestinationPath ../../../dist/${{ matrix.name }}/vibe-kanban.zip
+          Compress-Archive -Path vibe-kanban-mcp.exe -DestinationPath ../../../dist/${{ matrix.name }}/vibe-kanban-mcp.zip
+          Rename-Item review.exe vibe-kanban-review.exe
+          Compress-Archive -Path vibe-kanban-review.exe -DestinationPath ../../../dist/${{ matrix.name }}/vibe-kanban-review.zip
+
+      - name: Upload platform zips
+        uses: actions/upload-artifact@v6
+        with:
+          name: cli-${{ matrix.name }}
+          path: dist/${{ matrix.name }}/
+          retention-days: 1
+
+  upload-r2:
+    needs: [bump-version, build-cli]
+    runs-on: ubuntu-latest
+    steps:
+      - name: Download all platform zips
+        uses: actions/download-artifact@v7
+        with:
+          pattern: cli-*
+          path: binaries/
+          merge-multiple: false
+
+      - name: Flatten layout
+        run: |
+          mkdir -p flat
+          for dir in binaries/cli-*; do
+            platform=${dir#binaries/cli-}
+            mkdir -p flat/$platform
+            cp $dir/*.zip flat/$platform/
+          done
+          find flat/
+
+      - name: Generate manifest
+        run: |
+          node -e "
+            const fs=require('fs'), crypto=require('crypto');
+            const manifest={version:'${{ needs.bump-version.outputs.new_tag }}',platforms:{}};
+            const platforms=['linux-x64','linux-arm64','macos-x64','macos-arm64','windows-x64'];
+            const binaries=['vibe-kanban','vibe-kanban-mcp','vibe-kanban-review'];
+            for (const p of platforms) {
+              manifest.platforms[p]={};
+              for (const b of binaries) {
+                const zp='flat/'+p+'/'+b+'.zip';
+                if (fs.existsSync(zp)) {
+                  const d=fs.readFileSync(zp);
+                  manifest.platforms[p][b]={sha256:crypto.createHash('sha256').update(d).digest('hex'),size:d.length};
+                }
+              }
+            }
+            fs.writeFileSync('manifest.json', JSON.stringify(manifest,null,2));
+          "
+          cat manifest.json
+
+      - name: Configure AWS CLI for R2
+        run: |
+          aws configure set aws_access_key_id ${{ secrets.R2_BINARIES_ACCESS_KEY_ID }}
+          aws configure set aws_secret_access_key ${{ secrets.R2_BINARIES_SECRET_ACCESS_KEY }}
+          aws configure set default.region auto
+
+      - name: Upload zips to R2
+        env:
+          ENDPOINT: ${{ vars.R2_BINARIES_ENDPOINT }}
+          BUCKET: ${{ vars.R2_BINARIES_BUCKET }}
+          TAG: ${{ needs.bump-version.outputs.new_tag }}
+        run: |
+          for platform in linux-x64 linux-arm64 macos-x64 macos-arm64 windows-x64; do
+            for b in vibe-kanban vibe-kanban-mcp vibe-kanban-review; do
+              if [ -f "flat/$platform/$b.zip" ]; then
+                aws s3 cp "flat/$platform/$b.zip" \
+                  "s3://$BUCKET/binaries/$TAG/$platform/$b.zip" \
+                  --endpoint-url "$ENDPOINT"
+              fi
+            done
+          done
+          aws s3 cp manifest.json "s3://$BUCKET/binaries/$TAG/manifest.json" --endpoint-url "$ENDPOINT" --content-type application/json
+          echo "{\"latest\": \"${{ needs.bump-version.outputs.new_version }}\"}" | \
+            aws s3 cp - "s3://$BUCKET/binaries/manifest.json" --endpoint-url "$ENDPOINT" --content-type application/json
+
+  publish-npm:
+    needs: [bump-version, upload-r2]
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v6
+        with:
+          ref: ${{ needs.bump-version.outputs.new_tag }}
+
+      - uses: actions/setup-node@v5
+        with:
+          node-version: ${{ env.NODE_VERSION }}
+          registry-url: 'https://registry.npmjs.org'
+
+      - name: Install npx-cli deps
+        run: cd npx-cli && npm ci
+
+      - name: Build npx-cli
+        run: cd npx-cli && npm run build
+
+      - name: Bake R2 URL and tag into bundle
+        run: |
+          cd npx-cli
+          sed -i "s|__R2_PUBLIC_URL__|${{ vars.R2_BINARIES_PUBLIC_URL }}|g" bin/cli.js
+          sed -i "s|__BINARY_TAG__|${{ needs.bump-version.outputs.new_tag }}|g" bin/cli.js
+
+      - name: Pack and publish
+        run: |
+          cd npx-cli
+          npm pack
+          npm publish *.tgz --access public
+        env:
+          NODE_AUTH_TOKEN: ${{ secrets.NPM_TOKEN }}
+
+      - name: Attach tgz to GitHub release
+        uses: softprops/action-gh-release@153bb8e04406b158c6c84fc1615b65b24149a1fe
+        with:
+          tag_name: ${{ needs.bump-version.outputs.new_tag }}
+          generate_release_notes: true
+          files: |
+            npx-cli/*.tgz
+
+  build-remote-image:
+    needs: bump-version
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v6
+        with:
+          ref: ${{ needs.bump-version.outputs.new_tag }}
+
+      - uses: docker/setup-buildx-action@v3
+
+      - name: Log in to GHCR
+        uses: docker/login-action@v3
+        with:
+          registry: ghcr.io
+          username: ${{ github.actor }}
+          password: ${{ secrets.GITHUB_TOKEN }}
+
+      - name: Build and push
+        uses: docker/build-push-action@v6
+        with:
+          context: .
+          file: crates/remote/Dockerfile
+          push: true
+          tags: |
+            ghcr.io/harryy2510/vibe-kanban-remote:latest
+            ghcr.io/harryy2510/vibe-kanban-remote:${{ github.sha }}
+            ghcr.io/harryy2510/vibe-kanban-remote:${{ needs.bump-version.outputs.new_tag }}
+          build-args: |
+            VITE_RELAY_API_BASE_URL=https://relay.vibepilot.org
+          cache-from: type=gha
+          cache-to: type=gha,mode=max
+
+  build-relay-image:
+    needs: bump-version
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v6
+        with:
+          ref: ${{ needs.bump-version.outputs.new_tag }}
+
+      - uses: docker/setup-buildx-action@v3
+
+      - name: Log in to GHCR
+        uses: docker/login-action@v3
+        with:
+          registry: ghcr.io
+          username: ${{ github.actor }}
+          password: ${{ secrets.GITHUB_TOKEN }}
+
+      - name: Build and push
+        uses: docker/build-push-action@v6
+        with:
+          context: .
+          file: crates/relay-tunnel/Dockerfile
+          push: true
+          tags: |
+            ghcr.io/harryy2510/vibe-kanban-relay:latest
+            ghcr.io/harryy2510/vibe-kanban-relay:${{ github.sha }}
+            ghcr.io/harryy2510/vibe-kanban-relay:${{ needs.bump-version.outputs.new_tag }}
+          cache-from: type=gha
+          cache-to: type=gha,mode=max
+
+  deploy-dokploy:
+    needs: [build-remote-image, build-relay-image]
+    runs-on: ubuntu-latest
+    steps:
+      - name: Trigger Dokploy redeploy
+        run: |
+          curl -fsSL -X POST "${{ secrets.DOKPLOY_WEBHOOK_URL }}"
+
+  restart-oxmgr:
+    needs: publish-npm
+    runs-on: ubuntu-latest
+    steps:
+      - name: Restart oxmgr vibe-kanban app
+        uses: appleboy/ssh-action@v1
+        with:
+          host: ${{ vars.SERVER_SSH_HOST }}
+          username: ${{ vars.SERVER_SSH_USER }}
+          key: ${{ secrets.SERVER_SSH_KEY }}
+          script: |
+            source ~/.profile 2>/dev/null || true
+            source ~/.bashrc 2>/dev/null || true
+            export PATH="$HOME/.bun/bin:$HOME/.local/bin:/usr/local/bin:$PATH"
+            oxmgr restart vibe-kanban

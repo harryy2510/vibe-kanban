@@ -1,5 +1,6 @@
 use api_types::{
-    CreateIssueRelationshipRequest, IssueRelationship, IssueRelationshipType, MutationResponse,
+    CreateIssueRelationshipRequest, IssueRelationship, IssueRelationshipType,
+    ListIssueRelationshipsResponse, MutationResponse,
 };
 use rmcp::{
     ErrorData, handler::server::wrapper::Parameters, model::CallToolResult, schemars, tool,
@@ -9,6 +10,31 @@ use serde::{Deserialize, Serialize};
 use uuid::Uuid;
 
 use super::McpServer;
+
+#[derive(Debug, Deserialize, schemars::JsonSchema)]
+struct McpListIssueRelationshipsRequest {
+    #[schemars(description = "Issue ID to list relationships for")]
+    issue_id: Uuid,
+}
+
+#[derive(Debug, Serialize, schemars::JsonSchema)]
+struct IssueRelationshipSummary {
+    #[schemars(description = "Relationship ID")]
+    id: String,
+    #[schemars(description = "Source issue ID")]
+    issue_id: String,
+    #[schemars(description = "Related issue ID")]
+    related_issue_id: String,
+    #[schemars(description = "Relationship type: blocking, related, or has_duplicate")]
+    relationship_type: String,
+}
+
+#[derive(Debug, Serialize, schemars::JsonSchema)]
+struct McpListIssueRelationshipsResponse {
+    issue_id: String,
+    relationships: Vec<IssueRelationshipSummary>,
+    count: usize,
+}
 
 #[derive(Debug, Deserialize, schemars::JsonSchema)]
 struct McpCreateIssueRelationshipRequest {
@@ -41,6 +67,41 @@ struct McpDeleteIssueRelationshipResponse {
 
 #[tool_router(router = issue_relationships_tools_router, vis = "pub")]
 impl McpServer {
+    #[tool(description = "List all relationships for an issue (blocking, related, duplicates).")]
+    async fn list_issue_relationships(
+        &self,
+        Parameters(McpListIssueRelationshipsRequest { issue_id }): Parameters<
+            McpListIssueRelationshipsRequest,
+        >,
+    ) -> Result<CallToolResult, ErrorData> {
+        let url = self.url(&format!(
+            "/api/remote/issue-relationships?issue_id={}",
+            issue_id
+        ));
+        let response: ListIssueRelationshipsResponse =
+            match self.send_json(self.client.get(&url)).await {
+                Ok(r) => r,
+                Err(e) => return Ok(Self::tool_error(e)),
+            };
+
+        let relationships: Vec<IssueRelationshipSummary> = response
+            .issue_relationships
+            .into_iter()
+            .map(|r| IssueRelationshipSummary {
+                id: r.id.to_string(),
+                issue_id: r.issue_id.to_string(),
+                related_issue_id: r.related_issue_id.to_string(),
+                relationship_type: format!("{:?}", r.relationship_type).to_lowercase(),
+            })
+            .collect();
+
+        McpServer::success(&McpListIssueRelationshipsResponse {
+            issue_id: issue_id.to_string(),
+            count: relationships.len(),
+            relationships,
+        })
+    }
+
     #[tool(
         description = "Create a relationship between two issues. Types: 'blocking', 'related', 'has_duplicate'."
     )]

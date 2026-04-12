@@ -14,6 +14,9 @@ yarn-error.log*
 /build
 bindings/
 
+# Local bootstrap scripts (contain secrets, never commit)
+setup-gh.sh
+
 # Environment variables
 .env
 .env.remote
@@ -95,3 +98,5 @@ vibe-kanban-cloud/
 *.ts.net.key
 Caddyfile
 Caddyfile.dev
+
+.remember

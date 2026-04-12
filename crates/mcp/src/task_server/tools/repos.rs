@@ -275,4 +275,81 @@ impl McpServer {
             field: "dev_server_script".to_string(),
         })
     }
+
+    #[tool(
+        description = "Register a local repository by its filesystem path. Optionally provide a display name."
+    )]
+    async fn add_repo(
+        &self,
+        Parameters(AddRepoRequest { path, display_name }): Parameters<AddRepoRequest>,
+    ) -> Result<CallToolResult, ErrorData> {
+        let payload = serde_json::json!({
+            "path": path,
+            "display_name": display_name,
+        });
+
+        let url = self.url("/api/repos");
+        let repo: Repo = match self.send_json(self.client.post(&url).json(&payload)).await {
+            Ok(r) => r,
+            Err(e) => return Ok(Self::tool_error(e)),
+        };
+
+        McpServer::success(&AddRepoResponse {
+            id: repo.id.to_string(),
+            name: repo.name,
+            display_name: repo.display_name,
+        })
+    }
+
+    #[tool(
+        description = "Remove a repository from vibe-kanban. This unregisters the repo, it does not delete the actual files on disk. Use `list_repos` to find repo IDs."
+    )]
+    async fn delete_repo(
+        &self,
+        Parameters(DeleteRepoRequest { repo_id }): Parameters<DeleteRepoRequest>,
+    ) -> Result<CallToolResult, ErrorData> {
+        let url = self.url(&format!("/api/repos/{}", repo_id));
+        if let Err(e) = self.send_empty_json(self.client.delete(&url)).await {
+            return Ok(Self::tool_error(e));
+        }
+
+        McpServer::success(&DeleteRepoResponse {
+            success: true,
+            repo_id: repo_id.to_string(),
+        })
+    }
+}
+
+#[derive(Debug, Deserialize, schemars::JsonSchema)]
+struct AddRepoRequest {
+    #[schemars(description = "Absolute filesystem path to the repository")]
+    path: String,
+    #[schemars(description = "Optional display name for the repository")]
+    display_name: Option<String>,
+}
+
+#[derive(Debug, Serialize, schemars::JsonSchema)]
+struct AddRepoResponse {
+    #[schemars(description = "The newly registered repository ID")]
+    id: String,
+    #[schemars(description = "The repository name (derived from path)")]
+    name: String,
+    #[schemars(description = "The display name")]
+    display_name: String,
+}
+
+#[derive(Debug, Deserialize, schemars::JsonSchema)]
+struct DeleteRepoRequest {
+    #[schemars(
+        description = "The ID of the repository to remove. Use `list_repos` to find repo IDs."
+    )]
+    repo_id: Uuid,
+}
+
+#[derive(Debug, Serialize, schemars::JsonSchema)]
+struct DeleteRepoResponse {
+    #[schemars(description = "Whether the deletion was successful")]
+    success: bool,
+    #[schemars(description = "The repository ID that was removed")]
+    repo_id: String,
 }

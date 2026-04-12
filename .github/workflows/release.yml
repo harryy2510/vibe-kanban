@@ -70,13 +70,17 @@ jobs:
           (cd npx-cli && npm version "$new_version" --no-git-tag-version --allow-same-version)
           (cd packages/local-web && npm version "$new_version" --no-git-tag-version --allow-same-version)
           cargo set-version --workspace "$new_version"
+          # Also bump excluded crates (remote + relay-tunnel are workspace-exclude)
+          cargo set-version --manifest-path crates/remote/Cargo.toml "$new_version"
+          cargo set-version --manifest-path crates/relay-tunnel/Cargo.toml "$new_version"
 
       - name: Commit and tag
         run: |
           git config user.name "vibepilot-ci"
           git config user.email "ci@vibepilot.org"
-          git add package.json npx-cli/package.json packages/local-web/package.json Cargo.toml crates/*/Cargo.toml Cargo.lock
+          git add package.json npx-cli/package.json packages/local-web/package.json Cargo.toml crates/*/Cargo.toml Cargo.lock crates/remote/Cargo.toml crates/remote/Cargo.lock crates/relay-tunnel/Cargo.toml 2>/dev/null || true
           git commit -m "chore: bump version to ${{ steps.version.outputs.new_version }}"
+          git pull --rebase origin main
           git tag "${{ steps.version.outputs.new_tag }}"
           git push origin HEAD:main
           git push origin "${{ steps.version.outputs.new_tag }}"

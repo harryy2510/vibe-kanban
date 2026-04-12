@@ -286,6 +286,9 @@ jobs:
   build-remote-image:
     needs: meta
     runs-on: ubuntu-latest
+    permissions:
+      contents: read
+      packages: write
     steps:
       - uses: actions/checkout@v6
         with:
@@ -309,6 +312,10 @@ jobs:
           tags: |
             ghcr.io/harryy2510/vibe-kanban-remote:latest
             ghcr.io/harryy2510/vibe-kanban-remote:${{ needs.meta.outputs.tag }}
+          labels: |
+            org.opencontainers.image.source=https://github.com/harryy2510/vibe-kanban
+            org.opencontainers.image.description=VibePilot remote API service
+            org.opencontainers.image.licenses=MIT
           build-args: |
             VITE_RELAY_API_BASE_URL=https://relay.vibepilot.org
           cache-from: type=gha
@@ -317,6 +324,9 @@ jobs:
   build-relay-image:
     needs: meta
     runs-on: ubuntu-latest
+    permissions:
+      contents: read
+      packages: write
     steps:
       - uses: actions/checkout@v6
         with:
@@ -340,6 +350,10 @@ jobs:
           tags: |
             ghcr.io/harryy2510/vibe-kanban-relay:latest
             ghcr.io/harryy2510/vibe-kanban-relay:${{ needs.meta.outputs.tag }}
+          labels: |
+            org.opencontainers.image.source=https://github.com/harryy2510/vibe-kanban
+            org.opencontainers.image.description=VibePilot relay tunnel service
+            org.opencontainers.image.licenses=MIT
           cache-from: type=gha
           cache-to: type=gha,mode=max
 

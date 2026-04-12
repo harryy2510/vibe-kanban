@@ -312,3 +312,35 @@ jobs:
           generate_release_notes: true
           files: |
             npx-cli/*.tgz
+
+  build-remote-image:
+    needs: bump-version
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v6
+        with:
+          ref: ${{ needs.bump-version.outputs.new_tag }}
+
+      - uses: docker/setup-buildx-action@v3
+
+      - name: Log in to GHCR
+        uses: docker/login-action@v3
+        with:
+          registry: ghcr.io
+          username: ${{ github.actor }}
+          password: ${{ secrets.GITHUB_TOKEN }}
+
+      - name: Build and push
+        uses: docker/build-push-action@v6
+        with:
+          context: .
+          file: crates/remote/Dockerfile
+          push: true
+          tags: |
+            ghcr.io/harryy2510/vibe-kanban-remote:latest
+            ghcr.io/harryy2510/vibe-kanban-remote:${{ github.sha }}
+            ghcr.io/harryy2510/vibe-kanban-remote:${{ needs.bump-version.outputs.new_tag }}
+          build-args: |
+            VITE_RELAY_API_BASE_URL=https://relay.vibepilot.org
+          cache-from: type=gha
+          cache-to: type=gha,mode=max

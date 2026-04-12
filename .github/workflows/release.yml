@@ -80,3 +80,32 @@ jobs:
           git tag "${{ steps.version.outputs.new_tag }}"
           git push origin HEAD:main
           git push origin "${{ steps.version.outputs.new_tag }}"
+
+  build-frontend:
+    needs: bump-version
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v6
+        with:
+          ref: ${{ needs.bump-version.outputs.new_tag }}
+
+      - uses: actions/setup-node@v5
+        with:
+          node-version: ${{ env.NODE_VERSION }}
+
+      - uses: pnpm/action-setup@v4
+        with:
+          version: ${{ env.PNPM_VERSION }}
+
+      - name: Install dependencies
+        run: pnpm install --frozen-lockfile
+
+      - name: Build local-web
+        run: pnpm -C packages/local-web build
+
+      - name: Upload frontend artifact
+        uses: actions/upload-artifact@v6
+        with:
+          name: frontend-dist
+          path: packages/local-web/dist/
+          retention-days: 1

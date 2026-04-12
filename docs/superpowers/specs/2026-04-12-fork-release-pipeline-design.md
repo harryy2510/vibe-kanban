@@ -171,9 +171,34 @@ All upstream secrets removed: `VK_PRIVATE_DEPLOY_KEY`, `SENTRY_*`, `POSTHOG_*`, 
 
 ### npm
 
-1. Create npm account (if needed).
+**Bootstrap (first publish):**
+
+1. Create npm account if needed (username: `harryy`). Enable 2FA.
 2. Create org `@harryy` (free for public packages).
-3. Generate **Automation** access token.
+3. Generate a Granular Access Token for the **first publish only**:
+   - Name: `vibe-kanban bootstrap publish`
+   - Bypass 2FA: ✅
+   - Permissions: Read and write, scoped to `@harryy/*`
+   - Expiration: 30 days
+   - Leave "Allowed IP ranges" empty (GitHub Actions IPs rotate).
+4. Save as `NPM_TOKEN` secret.
+
+**Post-bootstrap (migrate to Trusted Publishing):**
+
+After the first successful publish of `@harryy/vibe-kanban`:
+
+1. On npmjs.com → package → Settings → **Trusted Publishing** → Add GitHub publisher:
+   - Organization: `harryy2510`
+   - Repository: `vibe-kanban`
+   - Workflow: `release.yml`
+   - Environment: (leave empty unless using GH environments)
+2. Update `release.yml`:
+   - Add `permissions: id-token: write` to the publish job.
+   - Remove `NODE_AUTH_TOKEN` env from the `npm publish` step (OIDC handles auth).
+3. Revoke the bootstrap token on npmjs.com.
+4. Delete `NPM_TOKEN` from GitHub secrets.
+
+After migration, publishes use short-lived OIDC tokens tied to the exact repo + workflow -- nothing to leak, nothing to rotate.
 
 ### GHCR
 

@@ -58,8 +58,6 @@ jobs:
               - 'packages/ui/**'
               - 'packages/web-core/**'
               - 'shared/**'
-              - '.github/workflows/release.yml'
-              - '.github/workflows/bump.yml'
             cli:
               - *shared
               - 'crates/server/**'

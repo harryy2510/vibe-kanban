@@ -83,7 +83,7 @@ jobs:
           git config user.email "ci@vibepilot.org"
           git add -u
           git status --short
-          git commit -m "chore: bump version to ${{ steps.version.outputs.new_version }}"
+          git commit -m "chore: bump version to ${{ steps.version.outputs.new_version }} [skip ci]"
           git pull --rebase origin main
           git tag "${{ steps.version.outputs.new_tag }}"
           git push origin HEAD:main
